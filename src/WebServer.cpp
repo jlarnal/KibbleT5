@@ -215,15 +215,17 @@ void WebServer::_handleWifiSave(AsyncWebServerRequest* request)
 void WebServer::startAPIServer()
 {
     _server.reset();
+
+    // Serve static files from SPIFFS first.
+    // The third parameter ("/") indicates to serve from the root of the SPIFFS partition.
+    // This will handle requests for /, /index.html, .js, .css, etc.
+    _server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
+
+    // Then, set up the API routes.
     _setupAPIRoutes();
 
-    _server.on(
-      "^.*\\.js$", HTTP_GET, [](AsyncWebServerRequest* request) { request->send(SPIFFS, request->url().c_str(), "application/javascript"); });
-
-    _server.on("^.*\\.css$", HTTP_GET, [](AsyncWebServerRequest* request) { request->send(SPIFFS, request->url().c_str(), "text/css"); });
-    // Serve static files from SPIFFS
-
-    _server.serveStatic("/", SPIFFS, "/spiffs").setDefaultFile("index.html");
+    // The onNotFound handler is set up inside _setupAPIRoutes,
+    // which will catch any requests not handled by serveStatic or the API routes.
 
     _server.begin();
     ESP_LOGI(TAG, "API Web Server started.");
@@ -546,7 +548,11 @@ void WebServer::_handleDeleteRecipe(AsyncWebServerRequest* request)
     }
 }
 
-void WebServer::_handleNotFound(AsyncWebServerRequest* request) { request->send(404, "text/plain", "Not found"); }
+void WebServer::_handleNotFound(AsyncWebServerRequest* request)
+{
+    ESP_LOGI(TAG, "URL target not found:`%s`", request->url().c_str());
+    request->send(404, "text/plain", "Not found");
+}
 
 void WebServer::_handleBody(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total,
   std::function<void(AsyncWebServerRequest*, JsonDocument&)> handler)

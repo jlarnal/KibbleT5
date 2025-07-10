@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "esp_log.h"
+#include "FS.h"
 
 #include "DeviceState.hpp"
 #include "ConfigManager.hpp"
@@ -52,6 +53,13 @@ void setup()
         return;
     }else{
         ESP_LOGI(TAG,"SPIFFS partition mounted.");
+        File root = SPIFFS.open("/");
+        File file = root.openNextFile();
+        ESP_LOGI(TAG, "Listing files in SPIFFS:");
+        while(file){
+            ESP_LOGI(TAG, "  FILE: %s, SIZE: %d", file.name(), file.size());
+            file = root.openNextFile();
+        }
     }
 
     configManager.begin();
