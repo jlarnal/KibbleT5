@@ -3,10 +3,11 @@
 #include "esp_log.h"
 #include <WiFi.h>
 #include <SPIFFS.h>
+#include <ESPmDNS.h>
 
 static const char* TAG = "WebServer";
 
-// Updated HTML constants
+// --- Captive Portal HTML ---
 const char* captivePortalHtml_Part1 = R"rawliteral(
 <!DOCTYPE HTML><html><head>
 <title>KibbleT5 WiFi Setup</title>
@@ -123,7 +124,25 @@ bool WebServer::manageWiFiConnection()
         xSemaphoreGive(_mutex);
     }
 
-    _display.showStatus("WiFi Connected", WiFi.localIP().toString().c_str());
+    // Set up mDNS responder
+    ESP_LOGI(TAG, "Setting up mDNS responder...");
+    std::string hostname;
+    if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
+        hostname = _deviceState.deviceName;
+        xSemaphoreGive(_mutex);
+    } else {
+        hostname = "kibblet5-fallback"; // Fallback hostname
+    }
+
+    if (MDNS.begin(hostname.c_str())) {
+        MDNS.addService("http", "tcp", 80);
+        ESP_LOGI(TAG, "mDNS responder started. You can now connect to http://%s.local", hostname.c_str());
+        _display.showStatus("Online!", (hostname + ".local").c_str());
+    } else {
+        ESP_LOGE(TAG, "Error setting up mDNS responder!");
+        _display.showStatus("WiFi Connected", WiFi.localIP().toString().c_str());
+    }
+
     vTaskDelay(pdMS_TO_TICKS(2000));
     return true;
 }
@@ -136,7 +155,7 @@ void WebServer::_startAPMode()
     size_t options_len          = 0;
     size_t option_format_length = strlen("      <option value=\"%s\">%s</option>\n") - 4;
     for (const auto& ssid : _scanned_ssids) {
-        options_len += option_format_length + (ssid.length() * 2); // <option value="ssid">ssid</option>\n
+        options_len += option_format_length + (ssid.length() * 2);
     }
 
     size_t total_len       = strlen(captivePortalHtml_Part1) + options_len + strlen(captivePortalHtml_Part2) + 1;
@@ -180,7 +199,6 @@ void WebServer::_startAPMode()
 void WebServer::_handleCaptivePortal(AsyncWebServerRequest* request)
 {
     if (_captive_portal_buffer) {
-        // Serve the pre-rendered page from the buffer
         request->send(200, "text/html", _captive_portal_buffer);
     } else {
         ESP_LOGE(TAG, "Captive portal buffer is null!");
@@ -215,72 +233,44 @@ void WebServer::_handleWifiSave(AsyncWebServerRequest* request)
 void WebServer::startAPIServer()
 {
     _server.reset();
-
-    // Serve static files from SPIFFS first.
-    // The third parameter ("/") indicates to serve from the root of the SPIFFS partition.
-    // This will handle requests for /, /index.html, .js, .css, etc.
-    _server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
-
-    // Then, set up the API routes.
     _setupAPIRoutes();
-
-    // The onNotFound handler is set up inside _setupAPIRoutes,
-    // which will catch any requests not handled by serveStatic or the API routes.
-
+    _server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
+    _server.onNotFound(std::bind(&WebServer::_handleNotFound, this, std::placeholders::_1));
     _server.begin();
     ESP_LOGI(TAG, "API Web Server started.");
 }
 
-
 void WebServer::_setupAPIRoutes()
 {
+    // System Routes
     _server.on("/system/info", HTTP_GET, std::bind(&WebServer::_handleGetSystemInfo, this, std::placeholders::_1));
     _server.on("/system/status", HTTP_GET, std::bind(&WebServer::_handleGetSystemStatus, this, std::placeholders::_1));
     _server.on("/system/restart", HTTP_POST, std::bind(&WebServer::_handleRestart, this, std::placeholders::_1));
     _server.on("/system/factory-reset", HTTP_POST, std::bind(&WebServer::_handleFactoryReset, this, std::placeholders::_1));
+
+    // Tank Routes
     _server.on("/tanks", HTTP_GET, std::bind(&WebServer::_handleGetTanks, this, std::placeholders::_1));
-    _server.on(
-      "/tanks/update", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
-      [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-          _handleBody(request, data, len, index, total, [this](AsyncWebServerRequest* req, JsonDocument& doc) { this->_handleUpdateTank(req, doc); });
-      });
-    _server.on("/scale", HTTP_GET, std::bind(&WebServer::_handleGetScale, this, std::placeholders::_1));
-    _server.on("/scale/tare", HTTP_POST, std::bind(&WebServer::_handleTareScale, this, std::placeholders::_1));
-    _server.on(
-      "/scale/calibrate", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
-      [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-          _handleBody(
-            request, data, len, index, total, [this](AsyncWebServerRequest* req, JsonDocument& doc) { this->_handleCalibrateScale(req, doc); });
-      });
-    _server.on("/feeding/history", HTTP_GET, std::bind(&WebServer::_handleGetFeedingHistory, this, std::placeholders::_1));
+    _server.on("^/tanks/([0-9A-Fa-f]{16})$", HTTP_PUT, [this](AsyncWebServerRequest* r){}, NULL, [this](AsyncWebServerRequest *r, uint8_t *d, size_t l, size_t i, size_t t){ _handleBody(r,d,l,i,t, [this](AsyncWebServerRequest* req, JsonDocument& doc){ this->_handleUpdateTank(req, doc); }); });
+
+    // Feeding Routes
+    _server.on("^/feed/immediate/([0-9A-Fa-f]{16})$", HTTP_POST, [this](AsyncWebServerRequest* r){}, NULL, [this](AsyncWebServerRequest *r, uint8_t *d, size_t l, size_t i, size_t t){ _handleBody(r,d,l,i,t, [this](AsyncWebServerRequest* req, JsonDocument& doc){ this->_handleFeedImmediate(req, doc); }); });
+    _server.on("^/feed/recipe/([0-9]+)$", HTTP_POST, [this](AsyncWebServerRequest* r){}, NULL, [this](AsyncWebServerRequest *r, uint8_t *d, size_t l, size_t i, size_t t){ _handleBody(r,d,l,i,t, [this](AsyncWebServerRequest* req, JsonDocument& doc){ this->_handleFeedRecipe(req, doc); }); });
     _server.on("/feeding/stop", HTTP_POST, std::bind(&WebServer::_handleStopFeeding, this, std::placeholders::_1));
-    _server.on(
-      "/feeding/immediate", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
-      [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-          _handleBody(
-            request, data, len, index, total, [this](AsyncWebServerRequest* req, JsonDocument& doc) { this->_handleFeedImmediate(req, doc); });
-      });
-    _server.on(
-      "/feeding/recipe", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
-      [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-          _handleBody(request, data, len, index, total, [this](AsyncWebServerRequest* req, JsonDocument& doc) { this->_handleFeedRecipe(req, doc); });
-      });
+    _server.on("/feeding/history", HTTP_GET, std::bind(&WebServer::_handleGetFeedingHistory, this, std::placeholders::_1));
+
+    // Recipe Routes
     _server.on("/recipes", HTTP_GET, std::bind(&WebServer::_handleGetRecipes, this, std::placeholders::_1));
-    _server.on(
-      "/recipes/add", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
-      [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-          _handleBody(request, data, len, index, total, [this](AsyncWebServerRequest* req, JsonDocument& doc) { this->_handleAddRecipe(req, doc); });
-      });
-    _server.on(
-      "/recipes/update", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
-      [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-          _handleBody(
-            request, data, len, index, total, [this](AsyncWebServerRequest* req, JsonDocument& doc) { this->_handleUpdateRecipe(req, doc); });
-      });
-    _server.on("/recipes/delete", HTTP_POST, std::bind(&WebServer::_handleDeleteRecipe, this, std::placeholders::_1));
-    _server.onNotFound(std::bind(&WebServer::_handleNotFound, this, std::placeholders::_1));
+    _server.on("/recipes", HTTP_POST, [this](AsyncWebServerRequest* r){}, NULL, [this](AsyncWebServerRequest *r, uint8_t *d, size_t l, size_t i, size_t t){ _handleBody(r,d,l,i,t, [this](AsyncWebServerRequest* req, JsonDocument& doc){ this->_handleAddRecipe(req, doc); }); });
+    _server.on("^/recipes/([0-9]+)$", HTTP_PUT, [this](AsyncWebServerRequest* r){}, NULL, [this](AsyncWebServerRequest *r, uint8_t *d, size_t l, size_t i, size_t t){ _handleBody(r,d,l,i,t, [this](AsyncWebServerRequest* req, JsonDocument& doc){ this->_handleUpdateRecipe(req, doc); }); });
+    _server.on("^/recipes/([0-9]+)$", HTTP_DELETE, std::bind(&WebServer::_handleDeleteRecipe, this, std::placeholders::_1));
+
+    // Scale Routes
+    _server.on("/scale/current", HTTP_GET, std::bind(&WebServer::_handleGetScale, this, std::placeholders::_1));
+    _server.on("/scale/tare", HTTP_POST, std::bind(&WebServer::_handleTareScale, this, std::placeholders::_1));
+    _server.on("/scale/calibrate", HTTP_POST, [this](AsyncWebServerRequest* r){}, NULL, [this](AsyncWebServerRequest *r, uint8_t *d, size_t l, size_t i, size_t t){ _handleBody(r,d,l,i,t, [this](AsyncWebServerRequest* req, JsonDocument& doc){ this->_handleCalibrateScale(req, doc); }); });
 }
 
+// --- System Handlers ---
 void WebServer::_handleGetSystemInfo(AsyncWebServerRequest* request)
 {
     JsonDocument doc;
@@ -296,7 +286,6 @@ void WebServer::_handleGetSystemInfo(AsyncWebServerRequest* request)
         request->send(503, "application/json", "{\"error\":\"Could not acquire state lock\"}");
         return;
     }
-
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response);
@@ -315,7 +304,6 @@ void WebServer::_handleGetSystemStatus(AsyncWebServerRequest* request)
         request->send(503, "application/json", "{\"error\":\"Could not acquire state lock\"}");
         return;
     }
-
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response);
@@ -336,18 +324,25 @@ void WebServer::_handleFactoryReset(AsyncWebServerRequest* request)
     ESP.restart();
 }
 
+// --- Tank Handlers ---
 void WebServer::_handleGetTanks(AsyncWebServerRequest* request)
 {
     JsonDocument doc;
     JsonArray tanksArray = doc.to<JsonArray>();
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         for (const auto& tank : _deviceState.connectedTanks) {
-            JsonObject tankObj       = tanksArray.add<JsonObject>();
-            tankObj["uid"]           = tank.uid;
-            tankObj["name"]          = tank.name;
-            tankObj["kibbleDensity"] = tank.kibbleDensity;
-            tankObj["level"]         = tank.level;
-            tankObj["servoId"]       = tank.servoId;
+            JsonObject tankObj = tanksArray.add<JsonObject>();
+            tankObj["uid"] = tank.uid;
+            tankObj["name"] = tank.name;
+            tankObj["ordinal"] = tank.ordinal;
+            tankObj["wcapacity"] = tank.w_capacity_kg * 1000;
+            tankObj["remainingWeight"] = tank.remaining_weight_kg * 1000;
+            
+            JsonObject calib = tankObj["calibration"].to<JsonObject>();
+            calib["idlePwm"] = tank.servoIdlePwm;
+            
+            tankObj["lastDispensed"] = 0; 
+            tankObj["totalDispensed"] = 0;
         }
         xSemaphoreGive(_mutex);
     } else {
@@ -361,14 +356,21 @@ void WebServer::_handleGetTanks(AsyncWebServerRequest* request)
 
 void WebServer::_handleUpdateTank(AsyncWebServerRequest* request, JsonDocument& doc)
 {
-    const char* uid  = doc["uid"];
+    String uid_str = request->pathArg(0);
     const char* name = doc["name"];
-    if (!uid || !name) {
-        request->send(400, "application/json", "{\"error\":\"Missing uid or name\"}");
+    
+    if (uid_str.isEmpty() || !name) {
+        request->send(400, "application/json", "{\"error\":\"Missing uid in path or name in body\"}");
         return;
     }
 
-    bool success = _tankManager.setTankName(uid, name);
+    uint8_t ordinal = _tankManager.getOrdinalForTank(uid_str.c_str());
+    if (ordinal == 255) {
+        request->send(404, "application/json", "{\"error\":\"Tank not found\"}");
+        return;
+    }
+
+    bool success = _tankManager.setTankName(ordinal, name);
     if (success) {
         request->send(200, "application/json", "{\"success\":true}");
     } else {
@@ -376,56 +378,26 @@ void WebServer::_handleUpdateTank(AsyncWebServerRequest* request, JsonDocument& 
     }
 }
 
-
-void WebServer::_handleGetScale(AsyncWebServerRequest* request)
-{
-    JsonDocument doc;
-    if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        doc["weight"] = _deviceState.currentWeight;
-        doc["stable"] = _deviceState.isWeightStable;
-        xSemaphoreGive(_mutex);
-    } else {
-        request->send(503, "application/json", "{\"error\":\"Could not acquire state lock\"}");
-        return;
-    }
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
-}
-
-void WebServer::_handleTareScale(AsyncWebServerRequest* request)
-{
-    if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
-        if (_deviceState.feedCommand.processed) {
-            _deviceState.feedCommand.type      = FeedCommandType::TARE_SCALE;
-            _deviceState.feedCommand.processed = false;
-            request->send(202, "application/json", "{\"success\":true, \"message\":\"Tare command accepted\"}");
-        } else {
-            request->send(429, "application/json", "{\"error\":\"Device busy with another command\"}");
-        }
-        xSemaphoreGive(_mutex);
-    } else {
-        request->send(503, "application/json", "{\"error\":\"Could not acquire state lock\"}");
-    }
-}
-
+// --- Feeding Handlers ---
 void WebServer::_handleFeedImmediate(AsyncWebServerRequest* request, JsonDocument& doc)
 {
-    JsonVariant amountVariant = doc["amountGrams"];
+    String tankUid = request->pathArg(0);
+    JsonVariant amountVariant = doc["amount"];
     if (amountVariant.isNull() || !amountVariant.is<float>() || amountVariant.as<float>() <= 0) {
-        request->send(400, "application/json", "{\"error\":\"Invalid or missing amountGrams\"}");
+        request->send(400, "application/json", "{\"error\":\"Invalid or missing amount\"}");
         return;
     }
     float amount = amountVariant.as<float>();
 
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
         if (_deviceState.feedCommand.processed) {
-            _deviceState.feedCommand.type        = FeedCommandType::IMMEDIATE;
+            _deviceState.feedCommand.type = FeedCommandType::IMMEDIATE;
+            _deviceState.feedCommand.tankUid = tankUid.c_str();
             _deviceState.feedCommand.amountGrams = amount;
-            _deviceState.feedCommand.processed   = false;
+            _deviceState.feedCommand.processed = false;
             request->send(202, "application/json", "{\"success\":true, \"message\":\"Immediate feed command accepted\"}");
         } else {
-            request->send(429, "application/json", "{\"error\":\"Device busy with another command\"}");
+            request->send(429, "application/json", "{\"error\":\"Device busy\"}");
         }
         xSemaphoreGive(_mutex);
     } else {
@@ -435,21 +407,20 @@ void WebServer::_handleFeedImmediate(AsyncWebServerRequest* request, JsonDocumen
 
 void WebServer::_handleFeedRecipe(AsyncWebServerRequest* request, JsonDocument& doc)
 {
-    JsonVariant idVariant = doc["recipeId"];
-    if (idVariant.isNull() || !idVariant.is<int>()) {
-        request->send(400, "application/json", "{\"error\":\"Missing or invalid recipeId\"}");
+    int recipeId = request->pathArg(0).toInt();
+    if (recipeId <= 0) {
+        request->send(400, "application/json", "{\"error\":\"Invalid recipeId\"}");
         return;
     }
-    int id = idVariant.as<int>();
 
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
         if (_deviceState.feedCommand.processed) {
-            _deviceState.feedCommand.type      = FeedCommandType::RECIPE;
-            _deviceState.feedCommand.recipeId  = id;
+            _deviceState.feedCommand.type = FeedCommandType::RECIPE;
+            _deviceState.feedCommand.recipeId = recipeId;
             _deviceState.feedCommand.processed = false;
             request->send(202, "application/json", "{\"success\":true, \"message\":\"Recipe feed command accepted\"}");
         } else {
-            request->send(429, "application/json", "{\"error\":\"Device busy with another command\"}");
+            request->send(429, "application/json", "{\"error\":\"Device busy\"}");
         }
         xSemaphoreGive(_mutex);
     } else {
@@ -469,6 +440,86 @@ void WebServer::_handleStopFeeding(AsyncWebServerRequest* request)
     }
 }
 
+void WebServer::_handleGetFeedingHistory(AsyncWebServerRequest* request)
+{
+    JsonDocument doc;
+    JsonArray historyArray = doc.to<JsonArray>();
+    if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        for (const auto& entry : _deviceState.feedingHistory) {
+            JsonObject entryObj = historyArray.add<JsonObject>();
+            entryObj["timestamp"] = entry.timestamp;
+            entryObj["type"] = entry.type;
+            if (entry.recipeId != -1) {
+                entryObj["recipeId"] = entry.recipeId;
+            }
+            entryObj["success"] = entry.success;
+            entryObj["amount"] = entry.amount;
+        }
+        xSemaphoreGive(_mutex);
+    } else {
+        request->send(503, "application/json", "{\"error\":\"Could not acquire state lock\"}");
+        return;
+    }
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+}
+
+// --- Scale Handlers ---
+void WebServer::_handleGetScale(AsyncWebServerRequest* request)
+{
+    JsonDocument doc;
+    if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        doc["rawValue"] = _deviceState.currentRawValue;
+        doc["weight"] = _deviceState.currentWeight;
+        doc["stable"] = _deviceState.isWeightStable;
+        doc["timestamp"] = _deviceState.currentTime;
+        xSemaphoreGive(_mutex);
+    } else {
+        request->send(503, "application/json", "{\"error\":\"Could not acquire state lock\"}");
+        return;
+    }
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+}
+
+void WebServer::_handleTareScale(AsyncWebServerRequest* request)
+{
+    if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        if (_deviceState.feedCommand.processed) {
+            _deviceState.feedCommand.type = FeedCommandType::TARE_SCALE;
+            _deviceState.feedCommand.processed = false;
+            request->send(202, "application/json", "{\"success\":true, \"message\":\"Tare command accepted\"}");
+        } else {
+            request->send(429, "application/json", "{\"error\":\"Device busy\"}");
+        }
+        xSemaphoreGive(_mutex);
+    } else {
+        request->send(503, "application/json", "{\"error\":\"Could not acquire state lock\"}");
+    }
+}
+
+void WebServer::_handleCalibrateScale(AsyncWebServerRequest* request, JsonDocument& doc)
+{
+    if (doc["knownWeight"].isNull()) {
+        request->send(400, "application/json", "{\"error\":\"Missing knownWeight\"}");
+        return;
+    }
+    float knownWeight = doc["knownWeight"];
+    float newFactor = _recipeProcessor.getScale().calibrateWithKnownWeight(knownWeight);
+
+    JsonDocument responseDoc;
+    responseDoc["success"] = true;
+    responseDoc["newCalibrationFactor"] = newFactor;
+    responseDoc["message"] = "Scale calibrated";
+    
+    String response;
+    serializeJson(responseDoc, response);
+    request->send(200, "application/json", response);
+}
+
+// --- Recipe Handlers ---
 void WebServer::_handleGetRecipes(AsyncWebServerRequest* request)
 {
     std::vector<Recipe> recipes = _recipeProcessor.getRecipes();
@@ -478,12 +529,22 @@ void WebServer::_handleGetRecipes(AsyncWebServerRequest* request)
         JsonObject recipeObj  = recipesArray.add<JsonObject>();
         recipeObj["id"]       = recipe.id;
         recipeObj["name"]     = recipe.name;
-        JsonArray ingredients = recipeObj["ingredients"].to<JsonArray>();
+        recipeObj["dailyWeight"] = recipe.dailyWeight;
+        recipeObj["servings"] = recipe.servings;
+        
+        JsonArray ingredients = recipeObj["tanks"].to<JsonArray>();
+        float totalGrams = 0;
         for (const auto& ing : recipe.ingredients) {
-            JsonObject ingObj     = ingredients.add<JsonObject>();
-            ingObj["tankUid"]     = ing.tankUid;
-            ingObj["amountGrams"] = ing.amountGrams;
+            totalGrams += ing.amountGrams;
         }
+
+        for (const auto& ing : recipe.ingredients) {
+            JsonObject ingObj = ingredients.add<JsonObject>();
+            ingObj["tankUid"] = ing.tankUid;
+            ingObj["percentage"] = (totalGrams > 0) ? (ing.amountGrams / totalGrams) * 100 : 0;
+        }
+        recipeObj["created"] = recipe.created;
+        recipeObj["lastUsed"] = recipe.lastUsed;
     }
     String response;
     serializeJson(doc, response);
@@ -498,12 +559,27 @@ void WebServer::_handleAddRecipe(AsyncWebServerRequest* request, JsonDocument& d
         request->send(400, "application/json", "{\"error\":\"Recipe name is required\"}");
         return;
     }
+    
+    recipe.dailyWeight = doc["dailyWeight"];
+    recipe.servings = doc["servings"];
+    recipe.created = time(nullptr);
+    recipe.lastUsed = 0;
 
-    JsonArray ingredients = doc["ingredients"];
-    for (JsonObject ingDoc : ingredients) {
+    JsonArray tanks = doc["tanks"];
+    float totalPercent = 0;
+    for (JsonObject tank : tanks) {
+        totalPercent += tank["percentage"].as<float>();
+    }
+
+    if (abs(totalPercent - 100.0) > 0.1) {
+        request->send(400, "application/json", "{\"error\":\"Percentages must sum to 100\"}");
+        return;
+    }
+
+    for (JsonObject tank : tanks) {
         RecipeIngredient ing;
-        ing.tankUid     = ingDoc["tankUid"].as<std::string>();
-        ing.amountGrams = ingDoc["amountGrams"];
+        ing.tankUid = tank["tankUid"].as<std::string>();
+        ing.amountGrams = (recipe.dailyWeight / recipe.servings) * (tank["percentage"].as<float>() / 100.0);
         recipe.ingredients.push_back(ing);
     }
 
@@ -516,14 +592,39 @@ void WebServer::_handleAddRecipe(AsyncWebServerRequest* request, JsonDocument& d
 
 void WebServer::_handleUpdateRecipe(AsyncWebServerRequest* request, JsonDocument& doc)
 {
+    int recipeId = request->pathArg(0).toInt();
+    if (recipeId <= 0) {
+        request->send(400, "application/json", "{\"error\":\"Invalid recipeId\"}");
+        return;
+    }
+
     Recipe recipe;
-    recipe.id             = doc["id"];
-    recipe.name           = doc["name"].as<std::string>();
-    JsonArray ingredients = doc["ingredients"];
-    for (JsonObject ingDoc : ingredients) {
+    recipe.id = recipeId;
+    recipe.name = doc["name"].as<std::string>();
+    if (recipe.name.empty()) {
+        request->send(400, "application/json", "{\"error\":\"Recipe name is required\"}");
+        return;
+    }
+    
+    recipe.dailyWeight = doc["dailyWeight"];
+    recipe.servings = doc["servings"];
+    recipe.lastUsed = time(nullptr); // Update last used time on edit
+
+    JsonArray tanks = doc["tanks"];
+    float totalPercent = 0;
+    for (JsonObject tank : tanks) {
+        totalPercent += tank["percentage"].as<float>();
+    }
+
+    if (abs(totalPercent - 100.0) > 0.1) {
+        request->send(400, "application/json", "{\"error\":\"Percentages must sum to 100\"}");
+        return;
+    }
+
+    for (JsonObject tank : tanks) {
         RecipeIngredient ing;
-        ing.tankUid     = ingDoc["tankUid"].as<std::string>();
-        ing.amountGrams = ingDoc["amountGrams"];
+        ing.tankUid = tank["tankUid"].as<std::string>();
+        ing.amountGrams = (recipe.dailyWeight / recipe.servings) * (tank["percentage"].as<float>() / 100.0);
         recipe.ingredients.push_back(ing);
     }
 
@@ -536,21 +637,23 @@ void WebServer::_handleUpdateRecipe(AsyncWebServerRequest* request, JsonDocument
 
 void WebServer::_handleDeleteRecipe(AsyncWebServerRequest* request)
 {
-    if (!request->hasParam("id")) {
-        request->send(400, "application/json", "{\"error\":\"Missing recipe id\"}");
+    int recipeId = request->pathArg(0).toInt();
+    if (recipeId <= 0) {
+        request->send(400, "application/json", "{\"error\":\"Invalid recipeId\"}");
         return;
     }
-    int id = request->getParam("id")->value().toInt();
-    if (_recipeProcessor.deleteRecipe(id)) {
+
+    if (_recipeProcessor.deleteRecipe(recipeId)) {
         request->send(200, "application/json", "{\"success\":true}");
     } else {
         request->send(404, "application/json", "{\"error\":\"Recipe not found\"}");
     }
 }
 
+// --- Utility Functions ---
 void WebServer::_handleNotFound(AsyncWebServerRequest* request)
 {
-    ESP_LOGI(TAG, "URL target not found:`%s`", request->url().c_str());
+    ESP_LOGW(TAG, "Not found: http://%s%s", request->host().c_str(), request->url().c_str());
     request->send(404, "text/plain", "Not found");
 }
 
@@ -582,13 +685,4 @@ void WebServer::_handleBody(AsyncWebServerRequest* request, uint8_t* data, size_
         }
         handler(request, doc);
     }
-}
-
-void WebServer::_handleCalibrateScale(AsyncWebServerRequest* request, JsonDocument& doc)
-{
-    request->send(501, "application/json", "{\"error\":\"Not Implemented\"}");
-}
-void WebServer::_handleGetFeedingHistory(AsyncWebServerRequest* request)
-{
-    request->send(501, "application/json", "{\"error\":\"Not Implemented\"}");
 }

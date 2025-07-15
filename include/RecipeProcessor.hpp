@@ -20,7 +20,8 @@ public:
     void begin();
 
     // These methods are called by the central feeding task
-    bool executeImmediateFeed(float targetWeight);
+    // The signature for immediate feed is updated to accept a tank UID.
+    bool executeImmediateFeed(const std::string& tankUid, float targetWeight);
     bool executeRecipeFeed(int recipeId);
     void stopAllFeeding();
 

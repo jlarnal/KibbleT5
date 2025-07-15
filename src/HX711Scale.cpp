@@ -27,6 +27,24 @@ float HX711Scale::getWeight() {
     return _scale.get_units(5); // Average 5 readings
 }
 
+long HX711Scale::getRawReading() {
+    return _scale.read_average(5);
+}
+
+// Calibrates the scale using a known weight.
+float HX711Scale::calibrateWithKnownWeight(float knownWeight) {
+    if (knownWeight <= 0) {
+        ESP_LOGE(TAG, "Calibration failed: Known weight must be positive.");
+        return _calibrationFactor;
+    }
+    long reading = getRawReading();
+    float new_factor = (float)(reading - _zeroOffset) / knownWeight;
+    setCalibrationFactor(new_factor);
+    saveCalibration();
+    ESP_LOGI(TAG, "Scale calibrated with new factor: %.4f", new_factor);
+    return new_factor;
+}
+
 void HX711Scale::setCalibrationFactor(float factor) {
     _calibrationFactor = factor;
     _scale.set_scale(factor);
@@ -66,11 +84,12 @@ void HX711Scale::_scaleTask(void *pvParameters) {
 
     for (;;) {
         float current_weight = instance->getWeight();
+        long raw_value = instance->getRawReading();
         
         if (xSemaphoreTake(instance->_mutex, portMAX_DELAY) == pdTRUE) {
-            // Check for stability (e.g., within 0.5g of the last reading)
             instance->_deviceState.isWeightStable = (abs(current_weight - instance->_deviceState.currentWeight) < 0.5);
             instance->_deviceState.currentWeight = current_weight;
+            instance->_deviceState.currentRawValue = raw_value;
             xSemaphoreGive(instance->_mutex);
         }
         

@@ -16,8 +16,12 @@ public:
     bool begin(uint8_t dataPin, uint8_t clockPin);
     void tare();
     float getWeight();
+    long getRawReading();
     void startTask();
     
+    // New method for calibration based on the API schema
+    float calibrateWithKnownWeight(float knownWeight);
+
     void setCalibrationFactor(float factor);
     float getCalibrationFactor();
     long getZeroOffset();
@@ -32,7 +36,6 @@ private:
     float _calibrationFactor;
     long _zeroOffset;
 
-    // The FreeRTOS task that continuously reads the scale
     static void _scaleTask(void *pvParameters);
 };
 

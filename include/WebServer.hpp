@@ -3,6 +3,7 @@
 
 #include <ESPAsyncWebServer.h>
 #include <DNSServer.h>
+#include <ESPmDNS.h>
 #include "DeviceState.hpp"
 #include "ConfigManager.hpp"
 #include "RecipeProcessor.hpp"

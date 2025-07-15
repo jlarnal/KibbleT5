@@ -27,22 +27,27 @@ enum class FeedCommandType {
 // Struct to hold feeding command details from the API
 struct FeedCommand {
     FeedCommandType type = FeedCommandType::NONE;
+    std::string tankUid = ""; 
     float amountGrams = 0.0;
     int recipeId = 0;
-    // This flag is set to false by the WebServer and true by the feedingTask
-    // to signal that a command has been acknowledged and is being processed.
     bool processed = true; 
 };
 
-// Struct for a single entry in the feeding history log
+// Expanded to match the API schema for feeding history
 struct FeedingHistoryEntry {
     time_t timestamp;
-    std::string description;
+    std::string type; // "recipe" or "immediate"
+    int recipeId; 
+    bool success;
     float amount;
+    std::string description; // e.g., Recipe Name or "Immediate Feed"
+
+    // Constructor to allow for direct initialization, fixing the compilation error.
+    FeedingHistoryEntry(time_t ts, const std::string& t, int rId, bool s, float a, const std::string& d)
+        : timestamp(ts), type(t), recipeId(rId), success(s), amount(a), description(d) {}
 };
 
 // The central volatile state structure for the entire application.
-// All inter-task data sharing happens through this struct, protected by a mutex.
 struct DeviceState {
     // System Status
     bool operational = true;
@@ -57,10 +62,11 @@ struct DeviceState {
     
     // Time
     time_t currentTime = 0;
-    char formattedTime[20] = "TIME_NOT_SET"; // "YYYY-MM-DD HH:MM:SS"
+    char formattedTime[20] = "TIME_NOT_SET";
 
     // Scale
     float currentWeight = 0.0;
+    long currentRawValue = 0;
     bool isWeightStable = false;
 
     // Tanks
@@ -75,8 +81,6 @@ struct DeviceState {
     bool servoPower = false;
 };
 
-// Global declarations for the state and its mutex.
-// The actual definitions are in DeviceState.cpp.
 extern DeviceState globalDeviceState;
 extern SemaphoreHandle_t xDeviceStateMutex;
 

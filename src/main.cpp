@@ -19,10 +19,8 @@
 // --- Global Objects ---
 ConfigManager configManager("KibbleT5");
 TimeKeeping timeKeeping(globalDeviceState, xDeviceStateMutex, configManager);
-OneWire oneWire(ONE_WIRE_BUS);
-OneWireEEPROM eepromController(&oneWire);
 ServoController servoController;
-TankManager tankManager(globalDeviceState, xDeviceStateMutex, &oneWire, &eepromController, &servoController);
+TankManager tankManager(globalDeviceState, xDeviceStateMutex, &servoController);
 HX711Scale scale(globalDeviceState, xDeviceStateMutex, configManager);
 RecipeProcessor recipeProcessor(globalDeviceState, xDeviceStateMutex, configManager, tankManager, servoController, scale);
 EPaperDisplay display(globalDeviceState, xDeviceStateMutex);
@@ -130,7 +128,8 @@ void feedingTask(void* pvParameters)
 
             switch (command.type) {
                 case FeedCommandType::IMMEDIATE:
-                    success = processor->executeImmediateFeed(command.amountGrams);
+                    // Pass the tankUid along with the amount, as required by the updated function signature.
+                    success = processor->executeImmediateFeed(command.tankUid, command.amountGrams);
                     break;
                 case FeedCommandType::RECIPE:
                     success = processor->executeRecipeFeed(command.recipeId);

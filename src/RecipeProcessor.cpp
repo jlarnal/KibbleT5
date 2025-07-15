@@ -18,29 +18,27 @@ HX711Scale& RecipeProcessor::getScale() {
     return _scale;
 }
 
-bool RecipeProcessor::executeImmediateFeed(float targetWeight) {
-    std::string tankToUse = "";
-    if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
-        for(const auto& tank : _deviceState.connectedTanks) {
-            if (tank.level > 10) {
-                tankToUse = tank.uid;
-                break;
-            }
-        }
-        xSemaphoreGive(_mutex);
-    }
-
-    if (tankToUse.empty()) {
-        ESP_LOGE(TAG, "Immediate feed failed: No tanks with sufficient food found.");
+bool RecipeProcessor::executeImmediateFeed(const std::string& tankUid, float targetWeight) {
+    if (tankUid.empty()) {
+        ESP_LOGE(TAG, "Immediate feed failed: No tank UID provided.");
         if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
-            _deviceState.lastError = "No tanks with sufficient food.";
+            _deviceState.lastError = "No tank specified for feed.";
             xSemaphoreGive(_mutex);
         }
         return false;
     }
 
-    ESP_LOGI(TAG, "Starting immediate feed of %.2fg from tank %s", targetWeight, tankToUse.c_str());
-    return _dispenseIngredient(tankToUse, targetWeight);
+    ESP_LOGI(TAG, "Starting immediate feed of %.2fg from tank %s", targetWeight, tankUid.c_str());
+    bool success = _dispenseIngredient(tankUid, targetWeight);
+
+    // Log the immediate feeding event
+    if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
+        FeedingHistoryEntry entry = {time(nullptr), "immediate", -1, success, targetWeight, "Immediate Feed"};
+        _deviceState.feedingHistory.push_back(entry);
+        xSemaphoreGive(_mutex);
+    }
+    
+    return success;
 }
 
 bool RecipeProcessor::executeRecipeFeed(int recipeId) {
@@ -56,6 +54,8 @@ bool RecipeProcessor::executeRecipeFeed(int recipeId) {
 
     ESP_LOGI(TAG, "Executing recipe '%s'", recipe.name.c_str());
     _scale.tare(); 
+    float totalDispensed = 0;
+    bool overallSuccess = true;
 
     for (const auto& ingredient : recipe.ingredients) {
         if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
@@ -64,7 +64,8 @@ bool RecipeProcessor::executeRecipeFeed(int recipeId) {
                 _deviceState.lastError = "Feeding stopped by user.";
                 xSemaphoreGive(_mutex);
                 stopAllFeeding();
-                return false;
+                overallSuccess = false;
+                break; 
             }
             xSemaphoreGive(_mutex);
         }
@@ -73,17 +74,28 @@ bool RecipeProcessor::executeRecipeFeed(int recipeId) {
         if (!_dispenseIngredient(ingredient.tankUid, ingredient.amountGrams)) {
             ESP_LOGE(TAG, "Failed to dispense ingredient from tank %s. Aborting recipe.", ingredient.tankUid.c_str());
             stopAllFeeding();
-            return false;
+            overallSuccess = false;
+            break;
         }
+        totalDispensed += ingredient.amountGrams; // This is an approximation
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    ESP_LOGI(TAG, "Recipe '%s' completed successfully.", recipe.name.c_str());
-    return true;
+    if (overallSuccess) {
+        ESP_LOGI(TAG, "Recipe '%s' completed successfully.", recipe.name.c_str());
+    }
+    
+    // Log the feeding event, whether it succeeded or failed
+    if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
+        FeedingHistoryEntry entry = {time(nullptr), "recipe", recipe.id, overallSuccess, totalDispensed, recipe.name};
+        _deviceState.feedingHistory.push_back(entry);
+        xSemaphoreGive(_mutex);
+    }
+    return overallSuccess;
 }
 
 bool RecipeProcessor::_dispenseIngredient(const std::string& tankUid, float targetWeight) {
-    uint8_t servoId = _tankManager.getServoIdForTank(tankUid);
+    uint8_t servoId = _tankManager.getOrdinalForTank(tankUid);
     if (servoId == 255) {
         ESP_LOGE(TAG, "Dispense failed: No servo found for tank UID %s", tankUid.c_str());
         if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
@@ -97,8 +109,8 @@ bool RecipeProcessor::_dispenseIngredient(const std::string& tankUid, float targ
     float dispensedWeight = 0;
     
     _servoController.setServoPower(true);
-    vTaskDelay(pdMS_TO_TICKS(100)); // Give power supply a moment to stabilize
-    _servoController.setContinuousServo(servoId, 1.0f); // Start dispensing at full speed
+    vTaskDelay(pdMS_TO_TICKS(100)); 
+    _servoController.setContinuousServo(servoId, 1.0f); 
 
     const TickType_t timeout = pdMS_TO_TICKS(30000); 
     TickType_t startTime = xTaskGetTickCount();
@@ -128,14 +140,14 @@ bool RecipeProcessor::_dispenseIngredient(const std::string& tankUid, float targ
         }
 
         if (targetWeight - dispensedWeight < 5.0) {
-            _servoController.setContinuousServo(servoId, 0.2f); // Slow speed
+            _servoController.setContinuousServo(servoId, 0.2f); 
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 
-    _servoController.setContinuousServo(servoId, 0.0f); // Stop servo
-    vTaskDelay(pdMS_TO_TICKS(500)); // Wait for servo to stop fully
+    _servoController.setContinuousServo(servoId, 0.0f); 
+    vTaskDelay(pdMS_TO_TICKS(500)); 
     _servoController.setServoPower(false);
 
     ESP_LOGI(TAG, "Dispensed %.2fg (target %.2fg) from tank %s", dispensedWeight, targetWeight, tankUid.c_str());

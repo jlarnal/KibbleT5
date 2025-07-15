@@ -1,10 +1,14 @@
 #include "OneWireEEPROM.hpp"
+#include "esp_log.h"
 
-// Define memory map for the EEPROM
-#define ADDR_NAME    0x00 // 64 bytes for name
-#define ADDR_DENSITY 0x40 // 4 bytes for float
+static const char* TAG = "OneWireEEPROM";
 
 OneWireEEPROM::OneWireEEPROM(OneWire* ds) : _ds(ds) {}
+
+// Sets the active OneWire bus for subsequent operations.
+void OneWireEEPROM::setOneWire(OneWire* ds) {
+    _ds = ds;
+}
 
 bool OneWireEEPROM::readBytes(const uint8_t* address, uint16_t memory_address, uint8_t* buffer, uint16_t len) {
     _ds->reset();
@@ -15,7 +19,6 @@ bool OneWireEEPROM::readBytes(const uint8_t* address, uint16_t memory_address, u
     for (uint16_t i = 0; i < len; i++) {
         buffer[i] = _ds->read();
     }
-    // No CRC check on read data in this simple implementation
     return true;
 }
 
@@ -28,30 +31,61 @@ bool OneWireEEPROM::writeBytes(const uint8_t* address, uint16_t memory_address, 
     for (uint16_t i = 0; i < len; i++) {
         _ds->write(buffer[i]);
     }
-    // A real implementation should wait for write completion or check status
+    // Note: A robust implementation would wait for write completion or check status here.
     return true;
 }
 
-std::string OneWireEEPROM::readName(const uint8_t* address) {
-    char name_buffer[65] = {0}; // 64 chars + null terminator
-    if (readBytes(address, ADDR_NAME, (uint8_t*)name_buffer, 64)) {
-        return std::string(name_buffer);
+bool OneWireEEPROM::readTankData(const uint8_t* address, TankEEpromData& data) {
+    return readBytes(address, 0, (uint8_t*)&data, sizeof(TankEEpromData));
+}
+
+bool OneWireEEPROM::writeTankData(const uint8_t* address, const TankEEpromData& data) {
+    return writeBytes(address, 0, (const uint8_t*)&data, sizeof(TankEEpromData));
+}
+
+uint16_t OneWireEEPROM::getDispensedAmount(const uint8_t* address) {
+    TankEEpromData data;
+    if (!readTankData(address, data)) {
+        ESP_LOGE(TAG, "Failed to read tank data to get dispensed amount.");
+        return 0;
     }
-    return "Read Failed";
+
+    // Find the first valid dispensed amount using the fail-safe mechanism.
+    for (int i = 0; i < 4; ++i) {
+        if ((data.dispensedSinceRefill[i] ^ data.notDSR[i]) == 0xFFFF) {
+            return data.dispensedSinceRefill[i];
+        }
+    }
+
+    ESP_LOGW(TAG, "No valid dispensed amount found for tank. Returning 0.");
+    return 0;
 }
 
-bool OneWireEEPROM::writeName(const uint8_t* address, const std::string& name) {
-    char name_buffer[64] = {0};
-    strncpy(name_buffer, name.c_str(), sizeof(name_buffer) - 1);
-    return writeBytes(address, ADDR_NAME, (const uint8_t*)name_buffer, sizeof(name_buffer));
-}
+bool OneWireEEPROM::updateDispensedAmount(const uint8_t* address, uint16_t newAmount) {
+    TankEEpromData data;
+    if (!readTankData(address, data)) {
+        ESP_LOGE(TAG, "Failed to read tank data to update dispensed amount.");
+        return false;
+    }
 
-float OneWireEEPROM::readDensity(const uint8_t* address) {
-    float density = 0.0f;
-    readBytes(address, ADDR_DENSITY, (uint8_t*)&density, sizeof(density));
-    return density;
-}
+    // Find the current valid slot and write to the next one for wear-leveling.
+    int currentSlot = -1;
+    for (int i = 0; i < 4; ++i) {
+        if ((data.dispensedSinceRefill[i] ^ data.notDSR[i]) == 0xFFFF) {
+            currentSlot = i;
+            break;
+        }
+    }
 
-bool OneWireEEPROM::writeDensity(const uint8_t* address, float density) {
-    return writeBytes(address, ADDR_DENSITY, (const uint8_t*)&density, sizeof(density));
+    int nextSlot = (currentSlot == -1) ? 0 : (currentSlot + 1) % 4;
+    
+    data.dispensedSinceRefill[nextSlot] = newAmount;
+    data.notDSR[nextSlot] = ~newAmount; // Bitwise NOT for validation
+
+    // Invalidate the old slot to ensure only the new one is valid.
+    if (currentSlot != -1) {
+        data.notDSR[currentSlot] = 0; 
+    }
+
+    return writeTankData(address, data);
 }

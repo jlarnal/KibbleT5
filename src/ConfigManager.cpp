@@ -149,6 +149,7 @@ bool ConfigManager::saveRecipes(const std::vector<Recipe>& recipes) {
         JsonArray ingredients = recipeObj["ingredients"].to<JsonArray>();
         for (const auto& ing : recipe.ingredients) {
             JsonObject ingObj = ingredients.add<JsonObject>();
+            // Storing tankUid as the identifier
             ingObj["tankUid"] = ing.tankUid;
             ingObj["amountGrams"] = ing.amountGrams;
         }
@@ -181,6 +182,7 @@ std::vector<Recipe> ConfigManager::loadRecipes() {
                     recipe.name = recipeObj["name"].as<std::string>();
                     for (JsonObject ingObj : recipeObj["ingredients"].as<JsonArray>()) {
                         RecipeIngredient ing;
+                        // Loading tankUid as the identifier
                         ing.tankUid = ingObj["tankUid"].as<std::string>();
                         ing.amountGrams = ingObj["amountGrams"];
                         recipe.ingredients.push_back(ing);

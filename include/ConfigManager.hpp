@@ -9,6 +9,7 @@
 
 // Struct for a single ingredient in a recipe
 struct RecipeIngredient {
+    // Reverted to use tankUid as the persistent identifier for an ingredient
     std::string tankUid;
     float amountGrams;
 };
@@ -18,6 +19,11 @@ struct Recipe {
     int id;
     std::string name;
     std::vector<RecipeIngredient> ingredients;
+    // Schema fields to be implemented
+    long created;
+    long lastUsed;
+    double dailyWeight;
+    int servings;
 };
 
 class ConfigManager {
