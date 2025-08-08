@@ -78,7 +78,7 @@ void setup()
 
         timeKeeping.begin();
 
-        //testOneWireGpios();
+        testOneWireGpios();
 
         // Load hopper calibration from config
         uint16_t hopper_closed, hopper_open;
@@ -192,7 +192,10 @@ static void printOneWireBusLevels(int driveBusIndex = -1)
     Serial.print("Levels seens on buses after 300ms: ");
     for (int idx = 0; idx < 6; idx++) {
         int lvl = digitalRead(g_OneWireBusesPin[idx]);
-        Serial.printf("\033[%dm%d", (idx == driveBusIndex ? 4 : 0), (lvl == 0 ? 0 : 1));
+        if (idx == driveBusIndex)
+            Serial.printf("\033[4m%c\033[0m", (lvl ? '1' : '0'));
+        else
+            Serial.printf("%c", (lvl ? '1' : '0'));
     }
     Serial.print("\033[0m\n"); // Force back normal format and jump line.
 }
@@ -202,21 +205,33 @@ void testOneWireGpios()
     while (Serial.available())
         Serial.read();
 
-    Serial.println("Starting one wire bus tests.\n  Press 'n' for next bus\n        'p' for previous bus\n       't' to toggle level\n       'i' to "
-                   "reset all to inputs\n       "
-                   " 'q' to end test\n");
-    int busIndex = 0, changeDir = 0, desiredLevel = HIGH;
+    Serial.println(
+      "Starting one wire bus tests.\n  Press 'n' for next bus\n        'p' for previous bus\n        't' to toggle level\n        'i' to "
+      "make all lines inputs\n        'r' to show levels\n        'q' to end test\n");
+    int busIndex = 0, changeDir = 0, desiredLevel = HIGH, lowPullIdx;
     bool testing = true;
     bool changed = true; // by default, to initiate the fist GPIO setup.
     while (testing) {
         if (Serial.available()) {
             int entry = Serial.read();
+
+            // In any case, echo the received character on its own line.
+            if (entry)
+                Serial.printf("%c\n", entry);
+
             switch (entry) {
+                case 'r':
+                [[fallthrough]]
+                case 'R':
+                    printOneWireBusLevels(busIndex);
+                    break;
+
                 case 'n':
                 [[fallthrough]]
                 case 'N':
                     changeDir = 1;
                     changed   = true;
+                    break;
                 case 'p':
                 [[fallthrough]]
                 case 'P':
@@ -263,16 +278,22 @@ void testOneWireGpios()
                 case '4':
                 [[fallthrough]]
                 case '5':
-
+                    lowPullIdx = entry - '0';
+                    if (lowPullIdx != busIndex) {
+                        Serial.printf("Pulling bus #%d (%d) low through open drain.\n", lowPullIdx, g_OneWireBusesPin[lowPullIdx]);
+                        pinMode(g_OneWireBusesPin[lowPullIdx], OUTPUT_OPEN_DRAIN);
+                        digitalWrite(g_OneWireBusesPin[lowPullIdx], LOW);
+                        vTaskDelay(300);
+                        printOneWireBusLevels(busIndex);
+                        pinMode(g_OneWireBusesPin[lowPullIdx], INPUT);
+                        changed   = false;
+                        changeDir = 0;
+                    }
                     break;
-
                 default:
                     break;
             }
 
-            // In any case, echo the received character on its own line.
-            if (entry)
-                Serial.printf("%c\n", entry);
 
             if (changed) {
                 changed = false; // it won't be "changed" on next loop
@@ -297,7 +318,7 @@ void testOneWireGpios()
                 changeDir = 0;
                 // Change the new bus pin mode & state
                 Serial.printf("Setting pin #%d for bus %d to high level (3.3V)\n", g_OneWireBusesPin[busIndex], busIndex);
-                pinMode(g_OneWireBusesPin[busIndex], OUTPUT_OPEN_DRAIN);
+                pinMode(g_OneWireBusesPin[busIndex], OUTPUT);
                 digitalWrite(g_OneWireBusesPin[busIndex], desiredLevel);
 
                 vTaskDelay(300);
