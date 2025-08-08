@@ -146,12 +146,17 @@ bool ConfigManager::saveRecipes(const std::vector<Recipe>& recipes) {
         JsonObject recipeObj = array.add<JsonObject>();
         recipeObj["id"] = recipe.id;
         recipeObj["name"] = recipe.name;
+        recipeObj["dailyWeight"] = recipe.dailyWeight;
+        recipeObj["servings"] = recipe.servings;
+        recipeObj["created"] = recipe.created;
+        recipeObj["lastUsed"] = recipe.lastUsed;
+
         JsonArray ingredients = recipeObj["ingredients"].to<JsonArray>();
         for (const auto& ing : recipe.ingredients) {
             JsonObject ingObj = ingredients.add<JsonObject>();
-            // Storing tankUid as the identifier
             ingObj["tankUid"] = ing.tankUid;
-            ingObj["amountGrams"] = ing.amountGrams;
+            // Persist the percentage value
+            ingObj["percentage"] = ing.percentage;
         }
     }
     
@@ -162,6 +167,7 @@ bool ConfigManager::saveRecipes(const std::vector<Recipe>& recipes) {
     esp_err_t err = nvs_set_str(_nvs_handle, "recipes", jsonString.c_str());
     if (err == ESP_OK) err = nvs_commit(_nvs_handle);
     _closeNVS();
+    ESP_LOGI(TAG, "Saved %d recipes to NVS.", recipes.size());
     return err == ESP_OK;
 }
 
@@ -180,11 +186,16 @@ std::vector<Recipe> ConfigManager::loadRecipes() {
                     Recipe recipe;
                     recipe.id = recipeObj["id"];
                     recipe.name = recipeObj["name"].as<std::string>();
+                    recipe.dailyWeight = recipeObj["dailyWeight"] | 0.0;
+                    recipe.servings = recipeObj["servings"] | 1;
+                    recipe.created = recipeObj["created"] | 0;
+                    recipe.lastUsed = recipeObj["lastUsed"] | 0;
+
                     for (JsonObject ingObj : recipeObj["ingredients"].as<JsonArray>()) {
                         RecipeIngredient ing;
-                        // Loading tankUid as the identifier
                         ing.tankUid = ingObj["tankUid"].as<std::string>();
-                        ing.amountGrams = ingObj["amountGrams"];
+                        // Load the percentage value
+                        ing.percentage = ingObj["percentage"] | 0.0f;
                         recipe.ingredients.push_back(ing);
                     }
                     recipes.push_back(recipe);
@@ -194,6 +205,7 @@ std::vector<Recipe> ConfigManager::loadRecipes() {
         delete[] buf;
     }
     _closeNVS();
+    ESP_LOGI(TAG, "Loaded %d recipes from NVS.", recipes.size());
     return recipes;
 }
 

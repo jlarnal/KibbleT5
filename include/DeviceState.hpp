@@ -30,6 +30,7 @@ struct FeedCommand {
     std::string tankUid = ""; 
     float amountGrams = 0.0;
     int recipeId = 0;
+    int servings = 1; // Add the servings member
     bool processed = true; 
 };
 
@@ -42,7 +43,7 @@ struct FeedingHistoryEntry {
     float amount;
     std::string description; // e.g., Recipe Name or "Immediate Feed"
 
-    // Constructor to allow for direct initialization, fixing the compilation error.
+    // Constructor to allow for direct initialization.
     FeedingHistoryEntry(time_t ts, const std::string& t, int rId, bool s, float a, const std::string& d)
         : timestamp(ts), type(t), recipeId(rId), success(s), amount(a), description(d) {}
 };
@@ -55,6 +56,7 @@ struct DeviceState {
     bool safetyModeEngaged = false;
     uint32_t uptime_s = 0;
     int8_t wifiStrength = 0;
+    uint8_t batteryLevel = 100;
     IPAddress ipAddress;
     std::string deviceName = "KibbleT5";
     std::string firmwareVersion = "1.1.0-stable";

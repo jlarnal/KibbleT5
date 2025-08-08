@@ -49,23 +49,47 @@ private:
     void _setupAPIRoutes();
 
     // --- API Handlers ---
+    // System
     void _handleGetSystemInfo(AsyncWebServerRequest *request);
     void _handleGetSystemStatus(AsyncWebServerRequest *request);
     void _handleRestart(AsyncWebServerRequest *request);
     void _handleFactoryReset(AsyncWebServerRequest *request);
+    
+    // Settings
+    void _handleGetSettings(AsyncWebServerRequest *request);
+    void _handleUpdateSettings(AsyncWebServerRequest *request, JsonDocument& doc);
+    void _handleExportSettings(AsyncWebServerRequest *request);
+
+    // Tanks
     void _handleGetTanks(AsyncWebServerRequest *request);
     void _handleUpdateTank(AsyncWebServerRequest *request, JsonDocument& doc);
+    void _handleGetTankHistory(AsyncWebServerRequest *request);
+
+    // Scale
     void _handleGetScale(AsyncWebServerRequest *request);
     void _handleTareScale(AsyncWebServerRequest *request);
     void _handleCalibrateScale(AsyncWebServerRequest *request, JsonDocument& doc);
+    
+    // Feeding
     void _handleFeedImmediate(AsyncWebServerRequest *request, JsonDocument& doc);
     void _handleFeedRecipe(AsyncWebServerRequest *request, JsonDocument& doc);
     void _handleGetFeedingHistory(AsyncWebServerRequest *request);
     void _handleStopFeeding(AsyncWebServerRequest *request);
+    
+    // Recipes
     void _handleGetRecipes(AsyncWebServerRequest *request);
     void _handleAddRecipe(AsyncWebServerRequest *request, JsonDocument& doc);
     void _handleUpdateRecipe(AsyncWebServerRequest *request, JsonDocument& doc);
     void _handleDeleteRecipe(AsyncWebServerRequest *request);
+
+    // Diagnostics & Logs
+    void _handleGetSensorDiagnostics(AsyncWebServerRequest *request);
+    void _handleGetServoDiagnostics(AsyncWebServerRequest *request);
+    void _handleGetNetworkInfo(AsyncWebServerRequest *request);
+    void _handleGetSystemLogs(AsyncWebServerRequest *request);
+    void _handleGetFeedingLogs(AsyncWebServerRequest *request);
+
+    // Utility
     void _handleNotFound(AsyncWebServerRequest *request);
     void _handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total, 
                      std::function<void(AsyncWebServerRequest*, JsonDocument&)> handler);

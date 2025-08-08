@@ -9,17 +9,17 @@
 
 // Struct for a single ingredient in a recipe
 struct RecipeIngredient {
-    // Reverted to use tankUid as the persistent identifier for an ingredient
     std::string tankUid;
-    float amountGrams;
+    // Changed to store the ingredient's mix ratio as a percentage.
+    float percentage;
 };
 
 // Struct for a complete recipe
 struct Recipe {
     int id;
     std::string name;
+    // The ingredients vector now holds percentages.
     std::vector<RecipeIngredient> ingredients;
-    // Schema fields to be implemented
     long created;
     long lastUsed;
     double dailyWeight;

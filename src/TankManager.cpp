@@ -7,6 +7,11 @@
 
 static const char* TAG = "TankManager";
 
+/* IMPORTANT NOTE: on the device, all GPIO used as oneWire buses are tied together through a network of 1k resistors, of which the common pin is left floating.
+ This means that in order to power a specific GPIO and leverage the open drain functionality of the IO pin used by the bus, one of the other buses must be brought 
+high, to the positive rail level, so that the slave devices may be powered.
+*/
+
 // Helper to convert a device address to a string for logging/UID.
 std::string addressToString(const uint8_t* addr) {
     char uid_str[17];
@@ -56,13 +61,19 @@ uint8_t TankManager::getOrdinalForTank(const std::string& tankUid) {
     return 255; // Return an invalid ordinal/ID if not found
 }
 
+// This function is now deprecated and its functionality is moved into updateTankConfig.
 bool TankManager::setTankName(uint8_t ordinal, const std::string& newName) {
-    // Find the tank by its ordinal.
+    ESP_LOGW(TAG, "setTankName is deprecated. Use updateTankConfig instead.");
+    return false;
+}
+
+// Handles updating the tank's configuration in its EEPROM.
+bool TankManager::updateTankConfig(const std::string& tankUid, const std::string& newName, double new_w_capacity_kg) {
     auto it = std::find_if(_knownTanks.begin(), _knownTanks.end(), 
-        [ordinal](const TankInfo& tank){ return tank.ordinal == ordinal; });
+        [&tankUid](const TankInfo& tank){ return tank.uid == tankUid; });
 
     if (it == _knownTanks.end() || !it->connected) {
-        ESP_LOGE(TAG, "Cannot set name for disconnected or unknown tank at ordinal %d", ordinal);
+        ESP_LOGE(TAG, "Cannot update config for disconnected or unknown tank with UID %s", tankUid.c_str());
         return false;
     }
 
@@ -72,26 +83,38 @@ bool TankManager::setTankName(uint8_t ordinal, const std::string& newName) {
            &addr[4], &addr[5], &addr[6], &addr[7]);
 
     TankEEpromData eepromData;
-    _eepromController->setOneWire(_oneWireBuses[ordinal]); // Point to the correct bus
+    _eepromController->setOneWire(_oneWireBuses[it->ordinal]); // Point to the correct bus
     if (!_eepromController->readTankData(addr, eepromData)) {
-        ESP_LOGE(TAG, "Failed to read EEPROM for tank %s to update name.", it->uid.c_str());
+        ESP_LOGE(TAG, "Failed to read EEPROM for tank %s to update config.", it->uid.c_str());
         return false;
     }
-
-    // Update the name and length field.
+    
+    // Update the name field
     eepromData.nameLength = std::min((size_t)95, newName.length());
     strncpy((char*)eepromData.name, newName.c_str(), 96);
     eepromData.name[95] = '\0'; // Ensure null termination.
 
+    // Update the capacity field
+    if (it->kibbleDensity > 0.001) { // Avoid division by zero
+        double newCapacityLiters = new_w_capacity_kg / it->kibbleDensity;
+        eepromData.capacity = double_to_q3_13(newCapacityLiters);
+        ESP_LOGI(TAG, "Updating capacity for %s: %.2f kg -> %.2f L", tankUid.c_str(), new_w_capacity_kg, newCapacityLiters);
+    } else {
+        ESP_LOGW(TAG, "Cannot update capacity for tank %s as kibble density is zero.", tankUid.c_str());
+    }
+
     if (_eepromController->writeTankData(addr, eepromData)) {
-        it->name = newName; // Update in-memory cache
-        ESP_LOGI(TAG, "Successfully updated name for tank %s to '%s'", it->uid.c_str(), newName.c_str());
+        // Update in-memory cache immediately for responsiveness
+        it->name = newName;
+        it->w_capacity_kg = new_w_capacity_kg;
+        ESP_LOGI(TAG, "Successfully updated config for tank %s to name '%s' and capacity %.2f kg", it->uid.c_str(), newName.c_str(), new_w_capacity_kg);
         return true;
     }
     
-    ESP_LOGE(TAG, "Failed to write new name to EEPROM for tank %s", it->uid.c_str());
+    ESP_LOGE(TAG, "Failed to write new config to EEPROM for tank %s", it->uid.c_str());
     return false;
 }
+
 
 void TankManager::_tankDiscoveryTask(void* pvParameters) {
    TankManager* instance = (TankManager*)pvParameters;
@@ -164,6 +187,7 @@ void TankManager::_discoverAndSyncTanks() {
             stateChanged = true;
         } else {
             for (size_t i = 0; i < discoveredTanks.size(); ++i) {
+                // A more robust check would compare more fields, but UID is a good proxy for major changes.
                 if (discoveredTanks[i].uid != _knownTanks[i].uid) {
                     stateChanged = true;
                     break;
@@ -175,6 +199,11 @@ void TankManager::_discoverAndSyncTanks() {
             _knownTanks = discoveredTanks;
             _deviceState.connectedTanks = _knownTanks; // Update global state
             ESP_LOGI(TAG, "Tank configuration changed. Now tracking %d tanks.", _knownTanks.size());
+        } else {
+            // Even if the set of tanks hasn't changed, their state (like remaining weight) has.
+            // So we update the global state regardless.
+            _knownTanks = discoveredTanks;
+            _deviceState.connectedTanks = _knownTanks;
         }
         xSemaphoreGive(_mutex);
     } else {

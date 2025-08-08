@@ -10,16 +10,18 @@
 
 #define TWEETER_PIN (25)
 
+#define BATT_HALFV_PIN (35)
 
-#define SERVO_POWER_ENABLE_PIN (15)
+
+#define SERVO_POWER_ENABLE_PIN (2)
 
 // The original ONE_WIRE_BUS is now replaced by an array for multiple buses.
 // This allows for up to 6 tanks, each on its own bus for identification.
-const int g_OneWireBusesPin[6] = {2, 19, 21, 22, 26, 27};
+const uint8_t g_OneWireBusesPin[6] = {19, 13, 27, 12, 32,33};
 
 
-#define HX711_DATA_PIN  (14)
-#define HX711_CLOCK_PIN (13)
+#define HX711_DATA_PIN  (15)
+#define HX711_CLOCK_PIN (14)
 
 #endif // H_EPD_PINOUT_H
 

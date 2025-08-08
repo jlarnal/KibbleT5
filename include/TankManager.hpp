@@ -46,6 +46,8 @@ public:
 
     // Public methods for tank management and information retrieval.
     bool setTankName(uint8_t ordinal, const std::string& newName);
+    // This function will handle updating various properties of the tank, not just the name.
+    bool updateTankConfig(const std::string& tankUid, const std::string& newName, double new_w_capacity_kg);
     uint8_t getOrdinalForTank(const std::string& tankUid);
 
 private:
