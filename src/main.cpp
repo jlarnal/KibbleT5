@@ -78,6 +78,7 @@ void setup()
 
         timeKeeping.begin();
 
+        // Launch the test subprogram helping us debug the oneWire buses power logic (see "IMPORTANT NOTE" in `Tankmanager.cpp`)
         testOneWireGpios();
 
         // Load hopper calibration from config
