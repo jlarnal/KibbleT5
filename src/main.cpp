@@ -188,6 +188,8 @@ void feedingTask(void* pvParameters)
     }
 }
 
+
+/** @brief Print the levels of the GPIOs used for oneWire buses. This is a sattelite function to `testOneWireGpios`.*/
 static void printOneWireBusLevels(int driveBusIndex = -1)
 {
     Serial.print("Levels seens on buses after 300ms: ");
@@ -201,6 +203,7 @@ static void printOneWireBusLevels(int driveBusIndex = -1)
     Serial.print("\033[0m\n"); // Force back normal format and jump line.
 }
 
+/** @brief Suspends operations and allows the dev to perform thorough test on the GPIOs used as oneWire buses. */
 void testOneWireGpios()
 {
     while (Serial.available())
