@@ -132,7 +132,7 @@ bool WebServer::manageWiFiConnection()
         hostname = _deviceState.deviceName;
         xSemaphoreGive(_mutex);
     } else {
-        hostname = "kibblet5-fallback"; // Fallback hostname
+        hostname = "kibblet5"; // Fallback hostname
     }
 
     if (MDNS.begin(hostname.c_str())) {

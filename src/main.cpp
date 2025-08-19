@@ -33,7 +33,8 @@ WebServer webServer(globalDeviceState, xDeviceStateMutex, configManager, recipeP
 Battery battMon(3000, 4200, BATT_HALFV_PIN);
 
 
-static const char* TAG = "main";
+static const char* TAG    = "main";
+static const char* OTATAG = "OTA update";
 
 // --- Prototypes for RTOS Tasks ---
 void feedingTask(void* pvParameters);
@@ -87,13 +88,10 @@ void setup()
     bool wifiConnected = webServer.manageWiFiConnection();
 
     if (wifiConnected) {
-        // --- SETUP ARDUINO OTA ---
-        // The hostname is set by MDNS in WebServer.cpp. ArduinoOTA will use it automatically.
 
-        // The begin() method requires arguments for this library version.
-        ArduinoOTA.begin(WiFi.localIP(), "Arduino", "password", InternalStorage);
-        ESP_LOGI(TAG, "ArduinoOTA Service Started.");
-
+        ESP_LOGI(TAG, "IP address is %s", WiFi.localIP().toString().c_str());
+        ArduinoOTA.begin();
+        
 
         webServer.startAPIServer();
 
@@ -120,7 +118,6 @@ void loop() { vTaskDelete(NULL); }
 
 void battAndOTA_Task(void* pvParameters)
 {
-    uint32_t lastBattUpdate = millis();
     if (pvParameters == nullptr) {
         ESP_LOGE(TAG, "Battery object pointer was null in `batteryTask`");
         return;
@@ -130,13 +127,9 @@ void battAndOTA_Task(void* pvParameters)
     pBatt->begin(3300, 2.0f, asigmoidal);
 
     for (;;) {
-        if ((millis() - lastBattUpdate) > 5000) {
-            globalDeviceState.batteryLevel = pBatt->level();
-            lastBattUpdate                 = millis();
-        }
 
-        ArduinoOTA.poll(); // Handle OTA updates in the background
-        vTaskDelay(pdMS_TO_TICKS(50));
+        globalDeviceState.batteryLevel = pBatt->level();
+        vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
 

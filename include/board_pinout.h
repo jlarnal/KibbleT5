@@ -13,7 +13,7 @@
 #define BATT_HALFV_PIN (35)
 
 
-#define SERVO_POWER_ENABLE_PIN (2)
+#define SERVO_POWER_ENABLE_PIN (33)
 
 // The original ONE_WIRE_BUS is now multiplexed through a 74HC4051 (analog multiplexer)
 // This allows for up to 6 tanks, each on its own bus for identification.
@@ -22,7 +22,7 @@
 #define ONEWIRE_MUX_S1_Pin (12)
 #define ONEWIRE_MUX_S2_Pin (32)
 #define ONEWIRE_MUX_DataPin (27)
-#define ONEWIRE_MUX_VCC_Pin (33)
+#define ONEWIRE_MUX_VCC_Pin (2)
 
 // Those two pins allow for communication with the HX711 strain gauge ADC.
 #define HX711_DATA_PIN  (15)
