@@ -5,11 +5,6 @@ static const char* TAG = "OneWireEEPROM";
 
 OneWireEEPROM::OneWireEEPROM(OneWire* ds) : _ds(ds) {}
 
-// Sets the active OneWire bus for subsequent operations.
-void OneWireEEPROM::setOneWire(OneWire* ds) {
-    _ds = ds;
-}
-
 bool OneWireEEPROM::readBytes(const uint8_t* address, uint16_t memory_address, uint8_t* buffer, uint16_t len) {
     _ds->reset();
     _ds->select(address);

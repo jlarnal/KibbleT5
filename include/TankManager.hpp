@@ -36,8 +36,7 @@ struct TankInfo {
 
 class TankManager {
 public:
-    // Constructor no longer takes OneWire or EEPROM controller directly,
-    // as it will now manage its own set of buses.
+    // Constructor now takes ServoController directly.
     TankManager(DeviceState& deviceState, SemaphoreHandle_t& mutex, 
                 ServoController* servoController);
     
@@ -50,14 +49,20 @@ public:
     bool updateTankConfig(const std::string& tankUid, const std::string& newName, double new_w_capacity_kg);
     uint8_t getOrdinalForTank(const std::string& tankUid);
 
+    // Public method for the hardware test suite
+    void testBus(uint8_t busIndex);
+
 private:
     DeviceState& _deviceState;
     SemaphoreHandle_t& _mutex;
     ServoController* _servoController;
     
-    // An array of OneWire instances, one for each bus.
-    OneWire* _oneWireBuses[6];
+    // A single OneWire instance for the multiplexer's common pin.
+    OneWire* _bus;
     OneWireEEPROM* _eepromController;
+
+    // A dedicated mutex to protect 1-Wire bus transactions.
+    SemaphoreHandle_t _oneWireMutex;
 
     // Internal list of tanks, which holds the comprehensive state.
     std::vector<TankInfo> _knownTanks; 
@@ -67,6 +72,10 @@ private:
     uint16_t double_to_q3_13(double d_val);
     double q2_14_to_double(uint16_t q_val);
     uint16_t double_to_q2_14(double d_val);
+
+    // Private helpers to manage the multiplexer hardware
+    void _selectBus(uint8_t busIndex);
+    void _powerBus(bool powerOn);
 
     static void _tankDiscoveryTask(void* pvParameters);
     void _discoverAndSyncTanks();

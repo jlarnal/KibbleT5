@@ -1,16 +1,11 @@
 #include "TankManager.hpp"
 #include "DeviceState.hpp" 
-#include "board_pinout.h" // For g_OneWireBusesPin
+#include "board_pinout.h" // For ONEWIRE_MUX pins
 #include "esp_log.h"
 #include <algorithm>
 #include <cstring>
 
 static const char* TAG = "TankManager";
-
-/* IMPORTANT NOTE: on the device, all GPIO used as oneWire buses are tied together through a network of 1k resistors, of which the common pin is left floating.
- This means that in order to power a specific GPIO and leverage the open drain functionality of the IO pin used by the bus, one of the other buses must be brought 
-high, to the positive rail level, so that the slave devices may be powered.
-*/
 
 // Helper to convert a device address to a string for logging/UID.
 std::string addressToString(const uint8_t* addr) {
@@ -21,21 +16,30 @@ std::string addressToString(const uint8_t* addr) {
     return std::string(uid_str);
 }
 
-// Constructor now initializes the OneWire buses and the EEPROM controller.
+// Constructor now initializes a single OneWire instance for the multiplexer.
 TankManager::TankManager(DeviceState& deviceState, SemaphoreHandle_t& mutex, 
                          ServoController* servoController)
     : _deviceState(deviceState), _mutex(mutex), 
       _servoController(servoController) {
-    for (int i = 0; i < 6; ++i) {
-        _oneWireBuses[i] = new OneWire(g_OneWireBusesPin[i]);
-    }
-    // Note: The EEPROM controller uses a single OneWire instance at a time,
-    // which we will manage before each operation. We pass the first bus as a default.
-    _eepromController = new OneWireEEPROM(_oneWireBuses[0]);
+    _bus = new OneWire(ONEWIRE_MUX_DataPin);
+    _eepromController = new OneWireEEPROM(_bus);
 }
 
 void TankManager::begin() {
-    ESP_LOGI(TAG, "Initializing Tank Manager with multi-bus support...");
+    _oneWireMutex = xSemaphoreCreateMutex();
+    
+    // Configure all MUX GPIOs as outputs
+    pinMode(ONEWIRE_MUX_notEnablePin, OUTPUT);
+    pinMode(ONEWIRE_MUX_S0_Pin, OUTPUT);
+    pinMode(ONEWIRE_MUX_S1_Pin, OUTPUT);
+    pinMode(ONEWIRE_MUX_S2_Pin, OUTPUT);
+    pinMode(ONEWIRE_MUX_VCC_Pin, OUTPUT);
+
+    // Set initial safe state
+    digitalWrite(ONEWIRE_MUX_notEnablePin, HIGH); // Disable the MUX
+    digitalWrite(ONEWIRE_MUX_VCC_Pin, LOW);      // Power is off
+
+    ESP_LOGI(TAG, "Initializing Tank Manager with 74HC4051 multiplexer...");
     _discoverAndSyncTanks();
 }
 
@@ -77,44 +81,82 @@ bool TankManager::updateTankConfig(const std::string& tankUid, const std::string
         return false;
     }
 
-    uint8_t addr[8];
-    sscanf(it->uid.c_str(), "%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx", 
-           &addr[0], &addr[1], &addr[2], &addr[3], 
-           &addr[4], &addr[5], &addr[6], &addr[7]);
+    bool success = false;
+    if (xSemaphoreTake(_oneWireMutex, portMAX_DELAY) == pdTRUE) {
+        _selectBus(it->ordinal);
+        _powerBus(true);
 
-    TankEEpromData eepromData;
-    _eepromController->setOneWire(_oneWireBuses[it->ordinal]); // Point to the correct bus
-    if (!_eepromController->readTankData(addr, eepromData)) {
-        ESP_LOGE(TAG, "Failed to read EEPROM for tank %s to update config.", it->uid.c_str());
-        return false;
-    }
-    
-    // Update the name field
-    eepromData.nameLength = std::min((size_t)95, newName.length());
-    strncpy((char*)eepromData.name, newName.c_str(), 96);
-    eepromData.name[95] = '\0'; // Ensure null termination.
+        uint8_t addr[8];
+        sscanf(it->uid.c_str(), "%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx%2hhx", 
+               &addr[0], &addr[1], &addr[2], &addr[3], 
+               &addr[4], &addr[5], &addr[6], &addr[7]);
 
-    // Update the capacity field
-    if (it->kibbleDensity > 0.001) { // Avoid division by zero
-        double newCapacityLiters = new_w_capacity_kg / it->kibbleDensity;
-        eepromData.capacity = double_to_q3_13(newCapacityLiters);
-        ESP_LOGI(TAG, "Updating capacity for %s: %.2f kg -> %.2f L", tankUid.c_str(), new_w_capacity_kg, newCapacityLiters);
-    } else {
-        ESP_LOGW(TAG, "Cannot update capacity for tank %s as kibble density is zero.", tankUid.c_str());
-    }
+        TankEEpromData eepromData;
+        if (_eepromController->readTankData(addr, eepromData)) {
+            // Update the name field
+            eepromData.nameLength = std::min((size_t)95, newName.length());
+            strncpy((char*)eepromData.name, newName.c_str(), 96);
+            eepromData.name[95] = '\0'; // Ensure null termination.
 
-    if (_eepromController->writeTankData(addr, eepromData)) {
-        // Update in-memory cache immediately for responsiveness
-        it->name = newName;
-        it->w_capacity_kg = new_w_capacity_kg;
-        ESP_LOGI(TAG, "Successfully updated config for tank %s to name '%s' and capacity %.2f kg", it->uid.c_str(), newName.c_str(), new_w_capacity_kg);
-        return true;
+            // Update the capacity field
+            if (it->kibbleDensity > 0.001) { // Avoid division by zero
+                double newCapacityLiters = new_w_capacity_kg / it->kibbleDensity;
+                eepromData.capacity = double_to_q3_13(newCapacityLiters);
+                ESP_LOGI(TAG, "Updating capacity for %s: %.2f kg -> %.2f L", tankUid.c_str(), new_w_capacity_kg, newCapacityLiters);
+            } else {
+                ESP_LOGW(TAG, "Cannot update capacity for tank %s as kibble density is zero.", tankUid.c_str());
+            }
+
+            if (_eepromController->writeTankData(addr, eepromData)) {
+                // Update in-memory cache immediately for responsiveness
+                it->name = newName;
+                it->w_capacity_kg = new_w_capacity_kg;
+                ESP_LOGI(TAG, "Successfully updated config for tank %s to name '%s' and capacity %.2f kg", it->uid.c_str(), newName.c_str(), new_w_capacity_kg);
+                success = true;
+            } else {
+                ESP_LOGE(TAG, "Failed to write new config to EEPROM for tank %s", it->uid.c_str());
+            }
+        } else {
+            ESP_LOGE(TAG, "Failed to read EEPROM for tank %s to update config.", it->uid.c_str());
+        }
+        
+        _powerBus(false);
+        xSemaphoreGive(_oneWireMutex);
     }
-    
-    ESP_LOGE(TAG, "Failed to write new config to EEPROM for tank %s", it->uid.c_str());
-    return false;
+    return success;
 }
 
+void TankManager::testBus(uint8_t busIndex) {
+    if (busIndex > 5) {
+        Serial.println("Error: Invalid bus index. Must be 0-5.");
+        return;
+    }
+
+    Serial.printf("Scanning 1-Wire bus #%d...\n", busIndex);
+
+    if (xSemaphoreTake(_oneWireMutex, portMAX_DELAY) == pdTRUE) {
+        _selectBus(busIndex);
+        _powerBus(true);
+
+        _bus->reset_search();
+        uint8_t addr[8];
+
+        if (_bus->search(addr)) {
+            if (OneWire::crc8(addr, 7) != addr[7]) {
+                Serial.println("  - Found device with invalid CRC.");
+            } else {
+                Serial.printf("  - Found device with address: %s\n", addressToString(addr).c_str());
+            }
+        } else {
+            Serial.println("  - No devices found on this bus.");
+        }
+
+        _powerBus(false);
+        xSemaphoreGive(_oneWireMutex);
+    } else {
+        Serial.println("Error: Could not acquire 1-Wire mutex for test.");
+    }
+}
 
 void TankManager::_tankDiscoveryTask(void* pvParameters) {
    TankManager* instance = (TankManager*)pvParameters;
@@ -134,51 +176,56 @@ void TankManager::_tankDiscoveryTask(void* pvParameters) {
 void TankManager::_discoverAndSyncTanks() {
     std::vector<TankInfo> discoveredTanks;
 
-    // Iterate through each of the 6 1-Wire buses.
-    for (int i = 0; i < 6; ++i) {
-        OneWire* bus = _oneWireBuses[i];
-        _eepromController->setOneWire(bus); // Important: point the EEPROM controller to the current bus.
-        bus->reset_search();
-        uint8_t addr[8];
+    if (xSemaphoreTake(_oneWireMutex, portMAX_DELAY) == pdTRUE) {
+        // Iterate through each of the 6 possible buses.
+        for (int i = 0; i < 6; ++i) {
+            _selectBus(i);
+            _powerBus(true);
 
-        // Search for a device on the current bus. We only expect one per bus.
-        if (bus->search(addr)) {
-            if (OneWire::crc8(addr, 7) != addr[7]) {
-                ESP_LOGW(TAG, "Bus %d: Found device with invalid CRC. Skipping.", i);
-                continue;
+            _bus->reset_search();
+            uint8_t addr[8];
+
+            // Search for a device on the currently selected bus.
+            if (_bus->search(addr)) {
+                if (OneWire::crc8(addr, 7) != addr[7]) {
+                    ESP_LOGW(TAG, "Bus %d: Found device with invalid CRC. Skipping.", i);
+                    continue;
+                }
+
+                std::string current_uid = addressToString(addr);
+                TankInfo discoveredTank;
+                discoveredTank.uid = current_uid;
+                discoveredTank.ordinal = i;
+                discoveredTank.connected = true;
+
+                // Read the data struct from the EEPROM.
+                TankEEpromData eepromData;
+                if (_eepromController->readTankData(addr, eepromData)) {
+                    // Populate the TankInfo struct with converted and calculated values.
+                    discoveredTank.name = std::string((char*)eepromData.name, eepromData.nameLength);
+                    discoveredTank.capacityLiters = q3_13_to_double(eepromData.capacity);
+                    discoveredTank.kibbleDensity = q2_14_to_double(eepromData.density);
+                    discoveredTank.servoIdlePwm = eepromData.calibration;
+                    
+                    uint16_t dispensedGrams = _eepromController->getDispensedAmount(addr);
+                    
+                    discoveredTank.w_capacity_kg = discoveredTank.capacityLiters * discoveredTank.kibbleDensity;
+                    double dispensed_kg = (double)dispensedGrams / 1000.0;
+                    
+                    discoveredTank.remaining_weight_kg = std::max(0.0, discoveredTank.w_capacity_kg - dispensed_kg);
+
+                } else {
+                    ESP_LOGE(TAG, "Bus %d: Failed to read EEPROM data for tank %s.", i, current_uid.c_str());
+                    discoveredTank.name = "Read Error";
+                }
+                discoveredTanks.push_back(discoveredTank);
             }
-
-            std::string current_uid = addressToString(addr);
-            TankInfo discoveredTank;
-            discoveredTank.uid = current_uid;
-            discoveredTank.ordinal = i;
-            discoveredTank.connected = true;
-
-            // Read the data struct from the EEPROM.
-            TankEEpromData eepromData;
-            if (_eepromController->readTankData(addr, eepromData)) {
-                // Populate the TankInfo struct with converted and calculated values.
-                discoveredTank.name = std::string((char*)eepromData.name, eepromData.nameLength);
-                discoveredTank.capacityLiters = q3_13_to_double(eepromData.capacity);
-                discoveredTank.kibbleDensity = q2_14_to_double(eepromData.density);
-                discoveredTank.servoIdlePwm = eepromData.calibration;
-                
-                uint16_t dispensedGrams = _eepromController->getDispensedAmount(addr);
-                
-                discoveredTank.w_capacity_kg = discoveredTank.capacityLiters * discoveredTank.kibbleDensity;
-                double dispensed_kg = (double)dispensedGrams / 1000.0;
-                
-                discoveredTank.remaining_weight_kg = std::max(0.0, discoveredTank.w_capacity_kg - dispensed_kg);
-
-            } else {
-                ESP_LOGE(TAG, "Bus %d: Failed to read EEPROM data for tank %s.", i, current_uid.c_str());
-                // Populate with default/error values
-                discoveredTank.name = "Read Error";
-                // ... set other fields to safe defaults
-            }
-            discoveredTanks.push_back(discoveredTank);
+            _powerBus(false);
+            vTaskDelay(pdMS_TO_TICKS(5)); // Small delay between channels
         }
+        xSemaphoreGive(_oneWireMutex);
     }
+
 
     // Compare with the known list and update the global state if changed.
     bool stateChanged = false;
@@ -187,7 +234,6 @@ void TankManager::_discoverAndSyncTanks() {
             stateChanged = true;
         } else {
             for (size_t i = 0; i < discoveredTanks.size(); ++i) {
-                // A more robust check would compare more fields, but UID is a good proxy for major changes.
                 if (discoveredTanks[i].uid != _knownTanks[i].uid) {
                     stateChanged = true;
                     break;
@@ -200,8 +246,7 @@ void TankManager::_discoverAndSyncTanks() {
             _deviceState.connectedTanks = _knownTanks; // Update global state
             ESP_LOGI(TAG, "Tank configuration changed. Now tracking %d tanks.", _knownTanks.size());
         } else {
-            // Even if the set of tanks hasn't changed, their state (like remaining weight) has.
-            // So we update the global state regardless.
+            // Update the global state regardless to reflect changes like remaining weight.
             _knownTanks = discoveredTanks;
             _deviceState.connectedTanks = _knownTanks;
         }
@@ -210,6 +255,29 @@ void TankManager::_discoverAndSyncTanks() {
         ESP_LOGE(TAG, "Failed to acquire mutex to update global tank list!");
     }
 }
+
+// New private method to control the MUX select lines
+void TankManager::_selectBus(uint8_t busIndex) {
+    if (busIndex > 7) return; // Basic bounds check
+
+    digitalWrite(ONEWIRE_MUX_S0_Pin, (busIndex & 1) ? HIGH : LOW);
+    digitalWrite(ONEWIRE_MUX_S1_Pin, (busIndex & 2) ? HIGH : LOW);
+    digitalWrite(ONEWIRE_MUX_S2_Pin, (busIndex & 4) ? HIGH : LOW); 
+
+    digitalWrite(ONEWIRE_MUX_notEnablePin, LOW); // Enable the MUX
+}
+
+// New private method to control the bus power
+void TankManager::_powerBus(bool powerOn) {
+    if (powerOn) {
+        digitalWrite(ONEWIRE_MUX_VCC_Pin, HIGH);
+        vTaskDelay(pdMS_TO_TICKS(10)); // Allow time for caps to charge
+    } else {
+        digitalWrite(ONEWIRE_MUX_VCC_Pin, LOW);
+        digitalWrite(ONEWIRE_MUX_notEnablePin, HIGH); // Disable MUX for extra safety
+    }
+}
+
 
 // --- Fixed-point conversion helpers ---
 

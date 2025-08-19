@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <SPIFFS.h>
 #include <ESPmDNS.h>
+#include <Update.h>
 
 static const char* TAG = "WebServer";
 
@@ -234,8 +235,39 @@ void WebServer::startAPIServer()
 {
     _server.reset();
     _setupAPIRoutes();
-    // Serve the SPA
-    _server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
+
+    // Serve static files with Gzip support
+    _server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+        String path = "/index.html";
+        String pathWithGz = path + ".gz";
+        if(SPIFFS.exists(pathWithGz)){
+            AsyncWebServerResponse *response = request->beginResponse(SPIFFS, pathWithGz, "text/html");
+            response->addHeader("Content-Encoding", "gzip");
+            request->send(response);
+        } else {
+            request->send(SPIFFS, path, "text/html");
+        }
+    });
+
+    _server.on("/*", HTTP_GET, [](AsyncWebServerRequest *request){
+        String path = request->url();
+        String contentType = "text/plain";
+        if(path.endsWith(".css")) contentType = "text/css";
+        else if(path.endsWith(".js")) contentType = "application/javascript";
+        else if(path.endsWith(".svg")) contentType = "image/svg+xml";
+
+        String pathWithGz = path + ".gz";
+        if(SPIFFS.exists(pathWithGz)){
+            AsyncWebServerResponse *response = request->beginResponse(SPIFFS, pathWithGz, contentType);
+            response->addHeader("Content-Encoding", "gzip");
+            request->send(response);
+        } else if (SPIFFS.exists(path)) {
+            request->send(SPIFFS, path, contentType);
+        } else {
+            request->send(404);
+        }
+    });
+
     _server.onNotFound(std::bind(&WebServer::_handleNotFound, this, std::placeholders::_1));
     _server.begin();
     ESP_LOGI(TAG, "API Web Server started.");
@@ -282,6 +314,14 @@ void WebServer::_setupAPIRoutes()
     _server.on("/network/info", HTTP_GET, std::bind(&WebServer::_handleGetNetworkInfo, this, std::placeholders::_1));
     _server.on("/logs/system", HTTP_GET, std::bind(&WebServer::_handleGetSystemLogs, this, std::placeholders::_1));
     _server.on("/logs/feeding", HTTP_GET, std::bind(&WebServer::_handleGetFeedingLogs, this, std::placeholders::_1));
+
+    // OTA Update Route
+    _server.on("/update", HTTP_POST, [](AsyncWebServerRequest *request){
+        AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", (Update.hasError())?"FAIL":"OK");
+        response->addHeader("Connection", "close");
+        request->send(response);
+        ESP.restart();
+    }, std::bind(&WebServer::_onUpdate, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6));
 }
 
 // --- System Handlers ---
@@ -869,7 +909,35 @@ void WebServer::_handleNotFound(AsyncWebServerRequest* request)
         request->send(404, "application/json", "{\"error\":\"Not found\"}");
     } else {
         // For any other path, serve the index.html. The Vue router will handle the client-side routing.
+        String pathWithGz = "/index.html.gz";
+        if(SPIFFS.exists(pathWithGz)){
+            AsyncWebServerResponse *response = request->beginResponse(SPIFFS, pathWithGz, "text/html");
+            response->addHeader("Content-Encoding", "gzip");
+            request->send(response);
+        } else {
         request->send(SPIFFS, "/index.html", "text/html");
+    }
+}
+}
+
+void WebServer::_onUpdate(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+    if (index == 0) {
+        ESP_LOGI(TAG, "Update Start: %s\n", filename.c_str());
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+            Update.printError(Serial);
+        }
+    }
+    if (!Update.hasError()) {
+        if (Update.write(data, len) != len) {
+            Update.printError(Serial);
+        }
+    }
+    if (final) {
+        if (Update.end(true)) {
+            ESP_LOGI(TAG, "Update Success: %u bytes\n", index + len);
+        } else {
+            Update.printError(Serial);
+        }
     }
 }
 

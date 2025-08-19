@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include "esp_log.h"
 #include "FS.h"
+#include <WiFi.h>
+#include <ArduinoOTA.h>
 
 #include "DeviceState.hpp"
 #include "ConfigManager.hpp"
@@ -16,6 +18,7 @@
 #include "WebServer.hpp"
 #include <SPIFFS.h>
 #include "Battery.h"
+#include "test.h" // Include the new test header
 
 // --- Global Objects ---
 ConfigManager configManager("KibbleT5");
@@ -32,14 +35,13 @@ Battery battMon(3000, 4200, BATT_HALFV_PIN);
 
 static const char* TAG = "main";
 
-void testOneWireGpios();
-
 // --- Prototypes for RTOS Tasks ---
 void feedingTask(void* pvParameters);
-void batteryTask(void* pvParameters);
+void battAndOTA_Task(void* pvParameters);
 
 void setup()
 {
+    Serial.setTxBufferSize(1024);
     Serial.begin(115200);
     vTaskDelay(pdMS_TO_TICKS(1000));
     ESP_LOGI(TAG, "--- KibbleT5 Starting Up ---");
@@ -49,11 +51,11 @@ void setup()
         ESP_LOGE(TAG, "Fatal: Could not create device state mutex.");
         return;
     } else {
-        ESP_LOGI(TAG, "Device stater mutex instanciated.");
+        ESP_LOGI(TAG, "Device state mutex instantiated.");
     }
 
     if (!SPIFFS.begin()) {
-        ESP_LOGE(TAG, "Fatal: Coult not initialize SPIFFS partition.");
+        ESP_LOGE(TAG, "Fatal: Could not initialize SPIFFS partition.");
         return;
     } else {
         ESP_LOGI(TAG, "SPIFFS partition mounted.");
@@ -71,24 +73,32 @@ void setup()
     display.showBootScreen();
     vTaskDelay(pdMS_TO_TICKS(2000));
 
+    // Initialize hardware before running tests
+    uint16_t hopper_closed, hopper_open;
+    configManager.loadHopperCalibration(hopper_closed, hopper_open);
+    servoController.begin(hopper_closed, hopper_open);
+    tankManager.begin();
+    scale.begin(HX711_DATA_PIN, HX711_CLOCK_PIN);
+
+    // --- RUN DIAGNOSTIC AND TEST CLI ---
+    doDebugTest(servoController, tankManager, scale);
+
+
     bool wifiConnected = webServer.manageWiFiConnection();
 
     if (wifiConnected) {
+        // --- SETUP ARDUINO OTA ---
+        // The hostname is set by MDNS in WebServer.cpp. ArduinoOTA will use it automatically.
+
+        // The begin() method requires arguments for this library version.
+        ArduinoOTA.begin(WiFi.localIP(), "Arduino", "password", InternalStorage);
+        ESP_LOGI(TAG, "ArduinoOTA Service Started.");
+
+
         webServer.startAPIServer();
 
         timeKeeping.begin();
 
-        // Launch the test subprogram helping us debug the oneWire buses power logic (see "IMPORTANT NOTE" in `Tankmanager.cpp`)
-        testOneWireGpios();
-
-        // Load hopper calibration from config
-        uint16_t hopper_closed, hopper_open;
-        configManager.loadHopperCalibration(hopper_closed, hopper_open);
-        // Initialize servo controller with the loaded values
-        servoController.begin(hopper_closed, hopper_open);
-
-        tankManager.begin();
-        scale.begin(HX711_DATA_PIN, HX711_CLOCK_PIN);
         recipeProcessor.begin();
 
         timeKeeping.startTask();
@@ -98,7 +108,7 @@ void setup()
         safetySystem.startTask();
 
         xTaskCreate(feedingTask, "Feeding Task", 4096, &recipeProcessor, 10, NULL);
-        xTaskCreate(batteryTask, "Batt monitor", 2048, &battMon, tskIDLE_PRIORITY, NULL);
+        xTaskCreate(battAndOTA_Task, "Batt monitor", 2048, &battMon, tskIDLE_PRIORITY, NULL);
         ESP_LOGI(TAG, "--- Setup Complete, System Operational ---");
     } else {
         ESP_LOGE(TAG, "Fatal: WiFi could not be configured. Halting.");
@@ -108,8 +118,9 @@ void setup()
 
 void loop() { vTaskDelete(NULL); }
 
-void batteryTask(void* pvParameters)
+void battAndOTA_Task(void* pvParameters)
 {
+    uint32_t lastBattUpdate = millis();
     if (pvParameters == nullptr) {
         ESP_LOGE(TAG, "Battery object pointer was null in `batteryTask`");
         return;
@@ -119,8 +130,13 @@ void batteryTask(void* pvParameters)
     pBatt->begin(3300, 2.0f, asigmoidal);
 
     for (;;) {
-        globalDeviceState.batteryLevel = pBatt->level();
-        vTaskDelay(5000);
+        if ((millis() - lastBattUpdate) > 5000) {
+            globalDeviceState.batteryLevel = pBatt->level();
+            lastBattUpdate                 = millis();
+        }
+
+        ArduinoOTA.poll(); // Handle OTA updates in the background
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
@@ -153,7 +169,6 @@ void feedingTask(void* pvParameters)
 
             switch (command.type) {
                 case FeedCommandType::IMMEDIATE:
-                    // Pass the tankUid along with the amount, as required by the updated function signature.
                     success = processor->executeImmediateFeed(command.tankUid, command.amountGrams);
                     break;
                 case FeedCommandType::RECIPE:
@@ -185,150 +200,5 @@ void feedingTask(void* pvParameters)
         }
 
         vTaskDelay(pdMS_TO_TICKS(200));
-    }
-}
-
-
-/** @brief Print the levels of the GPIOs used for oneWire buses. This is a sattelite function to `testOneWireGpios`.*/
-static void printOneWireBusLevels(int driveBusIndex = -1)
-{
-    Serial.print("Levels seens on buses after 300ms: ");
-    for (int idx = 0; idx < 6; idx++) {
-        int lvl = digitalRead(g_OneWireBusesPin[idx]);
-        if (idx == driveBusIndex)
-            Serial.printf("\033[4m%c\033[0m", (lvl ? '1' : '0'));
-        else
-            Serial.printf("%c", (lvl ? '1' : '0'));
-    }
-    Serial.print("\033[0m\n"); // Force back normal format and jump line.
-}
-
-/** @brief Suspends operations and allows the dev to perform thorough test on the GPIOs used as oneWire buses. */
-void testOneWireGpios()
-{
-    while (Serial.available())
-        Serial.read();
-
-    Serial.println(
-      "Starting one wire bus tests.\n  Press 'n' for next bus\n        'p' for previous bus\n        't' to toggle level\n        'i' to "
-      "make all lines inputs\n        'r' to show levels\n        'q' to end test\n");
-    int busIndex = 0, changeDir = 0, desiredLevel = HIGH, lowPullIdx;
-    bool testing = true;
-    bool changed = true; // by default, to initiate the fist GPIO setup.
-    while (testing) {
-        if (Serial.available()) {
-            int entry = Serial.read();
-
-            // In any case, echo the received character on its own line.
-            if (entry)
-                Serial.printf("%c\n", entry);
-
-            switch (entry) {
-                case 'r':
-                [[fallthrough]]
-                case 'R':
-                    printOneWireBusLevels(busIndex);
-                    break;
-
-                case 'n':
-                [[fallthrough]]
-                case 'N':
-                    changeDir = 1;
-                    changed   = true;
-                    break;
-                case 'p':
-                [[fallthrough]]
-                case 'P':
-                    changeDir = -1;
-                    changed   = true;
-                    break;
-                case 't':
-                [[fallthrough]]
-                case 'T':
-
-                    desiredLevel = desiredLevel == LOW ? HIGH : LOW;
-                    changeDir    = 0;
-                    changed      = true;
-                    Serial.printf("Toggling level of bus #%d (%d) from %s\n", busIndex, g_OneWireBusesPin[busIndex],
-                      (desiredLevel ? "HIGH to  LOW" : "LOW to HIGH"));
-                    break;
-                case 'i':
-                [[fallthrough]]
-                case 'I':
-                    Serial.println("Resetting all buses lines to inputs.");
-                    changeDir = 0;
-                    changed   = false;
-                    digitalWrite(g_OneWireBusesPin[busIndex], LOW);
-                    pinMode(g_OneWireBusesPin[busIndex], INPUT);
-                    vTaskDelay(300);
-                    printOneWireBusLevels();
-                    break;
-                case 'q':
-                [[fallthrough]]
-                case 'Q':
-                    digitalWrite(g_OneWireBusesPin[busIndex], LOW);
-                    pinMode(g_OneWireBusesPin[busIndex], INPUT);
-                    testing = false;
-                    Serial.println("Quitting the one wire bus GPIO test, resuming operations.");
-                    break;
-                case '0':
-                [[fallthrough]]
-                case '1':
-                [[fallthrough]]
-                case '2':
-                [[fallthrough]]
-                case '3':
-                [[fallthrough]]
-                case '4':
-                [[fallthrough]]
-                case '5':
-                    lowPullIdx = entry - '0';
-                    if (lowPullIdx != busIndex) {
-                        Serial.printf("Pulling bus #%d (%d) low through open drain.\n", lowPullIdx, g_OneWireBusesPin[lowPullIdx]);
-                        pinMode(g_OneWireBusesPin[lowPullIdx], OUTPUT_OPEN_DRAIN);
-                        digitalWrite(g_OneWireBusesPin[lowPullIdx], LOW);
-                        vTaskDelay(300);
-                        printOneWireBusLevels(busIndex);
-                        pinMode(g_OneWireBusesPin[lowPullIdx], INPUT);
-                        changed   = false;
-                        changeDir = 0;
-                    }
-                    break;
-                default:
-                    break;
-            }
-
-
-            if (changed) {
-                changed = false; // it won't be "changed" on next loop
-                // Revert the previous pin to input.
-                if (changeDir != 0) {
-                    Serial.printf("Configuring pin #%d for bus %d to high-Z.\n", g_OneWireBusesPin[busIndex], busIndex);
-                    digitalWrite(g_OneWireBusesPin[busIndex], LOW);
-                    pinMode(g_OneWireBusesPin[busIndex], INPUT);
-                }
-                if (changeDir > 0) { // increment bus index
-                    if (busIndex >= 5) // not just greater but greater OR EQUAL (failsafe)
-                        busIndex = 0;
-                    else
-                        busIndex++;
-                } else if (changeDir < 0) { // decrement bus index
-                    if (busIndex <= 0) // not just lesser but lesser OR EQUAL (failsafe)
-                        busIndex = 5;
-                    else
-                        busIndex--;
-                }
-                // lose the direction.
-                changeDir = 0;
-                // Change the new bus pin mode & state
-                Serial.printf("Setting pin #%d for bus %d to high level (3.3V)\n", g_OneWireBusesPin[busIndex], busIndex);
-                pinMode(g_OneWireBusesPin[busIndex], OUTPUT);
-                digitalWrite(g_OneWireBusesPin[busIndex], desiredLevel);
-
-                vTaskDelay(300);
-                printOneWireBusLevels(busIndex);
-            }
-            vTaskDelay(50);
-        }
     }
 }

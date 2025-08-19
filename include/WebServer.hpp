@@ -89,6 +89,9 @@ private:
     void _handleGetSystemLogs(AsyncWebServerRequest *request);
     void _handleGetFeedingLogs(AsyncWebServerRequest *request);
 
+    // OTA Update Handler
+    void _onUpdate(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
+
     // Utility
     void _handleNotFound(AsyncWebServerRequest *request);
     void _handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total, 

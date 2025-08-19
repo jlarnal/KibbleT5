@@ -3,7 +3,7 @@
 
 static const char* TAG = "ServoController";
 
-ServoController::ServoController() 
+ServoController::ServoController()
     : _pwm(Adafruit_PWMServoDriver()),
       _hopperOpenPwm(DEFAULT_HOPPER_OPEN_PWM), 
       _hopperClosedPwm(DEFAULT_HOPPER_CLOSED_PWM) {}
@@ -17,8 +17,8 @@ void ServoController::begin(uint16_t hopper_closed_pwm, uint16_t hopper_open_pwm
     _pwm.begin();
     _pwm.setPWMFreq(50); // Standard servo frequency
     pinMode(SERVO_POWER_ENABLE_PIN, OUTPUT);
-    digitalWrite(SERVO_POWER_ENABLE_PIN, LOW); // Start with power off
-    
+    digitalWrite(SERVO_POWER_ENABLE_PIN, HIGH); // Start with power off (HIGH for active-low)
+
     ESP_LOGI(TAG, "Servo Controller Initialized. Hopper cal: Open=%d, Closed=%d", _hopperOpenPwm, _hopperClosedPwm);
 }
 
@@ -29,7 +29,9 @@ void ServoController::setServoPWM(uint8_t servoNum, uint16_t pwm) {
 }
 
 void ServoController::setServoPower(bool on) {
-    digitalWrite(SERVO_POWER_ENABLE_PIN, on ? HIGH : LOW);
+    // Corrected for active-low logic:
+    // ON = LOW, OFF = HIGH
+    digitalWrite(SERVO_POWER_ENABLE_PIN, on ? LOW : HIGH);
     ESP_LOGI(TAG, "Servo power %s", on ? "ON" : "OFF");
 }
 

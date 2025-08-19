@@ -22,12 +22,8 @@ typedef struct TankEEpromData_t{
 
 class OneWireEEPROM {
 public:
-    // The constructor now takes a pointer to a OneWire object.
-    // The specific bus will be handled by the caller (TankManager).
+    // The constructor now takes a pointer to the single OneWire object.
     OneWireEEPROM(OneWire* ds);
-
-    // Allows the TankManager to switch the active 1-Wire bus.
-    void setOneWire(OneWire* ds);
 
     // Low-level byte read/write functions remain for flexibility.
     bool readBytes(const uint8_t* address, uint16_t memory_address, uint8_t* buffer, uint16_t len);
