@@ -1,12 +1,18 @@
 #ifndef ONEWIREEPROM_HPP
 #define ONEWIREEPROM_HPP
 
-#include <OneWire.h>
+#include "1wire.h"
 #include <string>
 #include <cstdint>
 
+// Use extern "C" to link the C library in a C++ project
+extern "C" {
+    #include "1wire.h"
+}
+
 #define EEPROM_CMD_WRITE 0x0F
 #define EEPROM_CMD_READ  0xF0
+#define EEPROM_CMD_MATCH_ROM 0x55
 
 // Data structure for the tank's EEPROM, aligned with the new specification.
 typedef struct TankEEpromData_t{
@@ -22,8 +28,8 @@ typedef struct TankEEpromData_t{
 
 class OneWireEEPROM {
 public:
-    // The constructor now takes a pointer to the single OneWire object.
-    OneWireEEPROM(OneWire* ds);
+    // The constructor now takes a pointer to the OW struct (the C library handle).
+    OneWireEEPROM(OneWireConfig_t* ow);
 
     // Low-level byte read/write functions remain for flexibility.
     bool readBytes(const uint8_t* address, uint16_t memory_address, uint8_t* buffer, uint16_t len);
@@ -38,7 +44,7 @@ public:
     bool updateDispensedAmount(const uint8_t* address, uint16_t newAmount);
 
 private:
-    OneWire* _ds;
+    OneWireConfig_t* _ow;
 };
 
 #endif // ONEWIREEPROM_HPP

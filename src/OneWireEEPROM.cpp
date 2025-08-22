@@ -1,32 +1,46 @@
 #include "OneWireEEPROM.hpp"
 #include "esp_log.h"
+#include <string.h>
 
 static const char* TAG = "OneWireEEPROM";
 
-OneWireEEPROM::OneWireEEPROM(OneWire* ds) : _ds(ds) {}
+OneWireEEPROM::OneWireEEPROM(OneWireConfig_t* ow) : _ow(ow) {}
 
 bool OneWireEEPROM::readBytes(const uint8_t* address, uint16_t memory_address, uint8_t* buffer, uint16_t len) {
-    _ds->reset();
-    _ds->select(address);
-    _ds->write(EEPROM_CMD_READ);
-    _ds->write(memory_address & 0xFF); // LSB
-    _ds->write(memory_address >> 8);   // MSB
+    if (!ow_reset(_ow)) return false;
+    
+    ow_send(_ow, EEPROM_CMD_MATCH_ROM);
+    for(int i = 0; i < 8; i++) {
+        ow_send(_ow, address[i]);
+    }
+
+    ow_send(_ow, EEPROM_CMD_READ);
+    ow_send(_ow, memory_address & 0xFF); // LSB
+    ow_send(_ow, memory_address >> 8);   // MSB
+    
     for (uint16_t i = 0; i < len; i++) {
-        buffer[i] = _ds->read();
+        buffer[i] = ow_read(_ow);
     }
     return true;
 }
 
 bool OneWireEEPROM::writeBytes(const uint8_t* address, uint16_t memory_address, const uint8_t* buffer, uint16_t len) {
-    _ds->reset();
-    _ds->select(address);
-    _ds->write(EEPROM_CMD_WRITE);
-    _ds->write(memory_address & 0xFF); // LSB
-    _ds->write(memory_address >> 8);   // MSB
+    if (!ow_reset(_ow)) return false;
+
+    ow_send(_ow, EEPROM_CMD_MATCH_ROM);
+    for(int i = 0; i < 8; i++) {
+        ow_send(_ow, address[i]);
+    }
+
+    ow_send(_ow, EEPROM_CMD_WRITE);
+    ow_send(_ow, memory_address & 0xFF); // LSB
+    ow_send(_ow, memory_address >> 8);   // MSB
+    
     for (uint16_t i = 0; i < len; i++) {
-        _ds->write(buffer[i]);
+        ow_send(_ow, buffer[i]);
     }
     // Note: A robust implementation would wait for write completion or check status here.
+    vTaskDelay(pdMS_TO_TICKS(10)); // Give EEPROM time to write
     return true;
 }
 

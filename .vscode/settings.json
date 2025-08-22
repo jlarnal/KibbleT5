@@ -54,6 +54,9 @@
         "streambuf": "cpp",
         "thread": "cpp",
         "cinttypes": "cpp",
-        "typeinfo": "cpp"
+        "typeinfo": "cpp",
+        "gpio_hal.h": "c",
+        "gpio_periph.h": "c",
+        "esp32-hal-gpio.h": "c"
     }
 }

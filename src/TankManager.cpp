@@ -16,13 +16,14 @@ std::string addressToString(const uint8_t* addr) {
     return std::string(uid_str);
 }
 
-// Constructor now initializes a single OneWire instance for the multiplexer.
+// Constructor now initializes the C 1-Wire driver.
 TankManager::TankManager(DeviceState& deviceState, SemaphoreHandle_t& mutex, 
                          ServoController* servoController)
     : _deviceState(deviceState), _mutex(mutex), 
       _servoController(servoController) {
-    _bus = new OneWire(ONEWIRE_MUX_DataPin);
-    _eepromController = new OneWireEEPROM(_bus);
+    
+    ow_init(&owCfg, (gpio_num_t) ONEWIRE_MUX_DataPin);
+    _eepromController = new OneWireEEPROM(&owCfg);
 }
 
 void TankManager::begin() {
@@ -138,15 +139,13 @@ void TankManager::testBus(uint8_t busIndex) {
         _selectBus(busIndex);
         _powerBus(true);
 
-        _bus->reset_search();
-        uint8_t addr[8];
+        uint64_t rom_code = 0;
+        int devices_found = ow_romsearch(&owCfg, &rom_code, 1, 0xF0);
 
-        if (_bus->search(addr)) {
-            if (OneWire::crc8(addr, 7) != addr[7]) {
-                Serial.println("  - Found device with invalid CRC.");
-            } else {
+        if (devices_found > 0) {
+        uint8_t addr[8];
+            memcpy(addr, &rom_code, 8);
                 Serial.printf("  - Found device with address: %s\n", addressToString(addr).c_str());
-            }
         } else {
             Serial.println("  - No devices found on this bus.");
         }
@@ -182,15 +181,12 @@ void TankManager::_discoverAndSyncTanks() {
             _selectBus(i);
             _powerBus(true);
 
-            _bus->reset_search();
-            uint8_t addr[8];
+            uint64_t rom_code = 0;
+            int devices_found = ow_romsearch(&owCfg, &rom_code, 1, 0xF0);
 
-            // Search for a device on the currently selected bus.
-            if (_bus->search(addr)) {
-                if (OneWire::crc8(addr, 7) != addr[7]) {
-                    ESP_LOGW(TAG, "Bus %d: Found device with invalid CRC. Skipping.", i);
-                    continue;
-                }
+            if (devices_found > 0) {
+            uint8_t addr[8];
+                memcpy(addr, &rom_code, 8);
 
                 std::string current_uid = addressToString(addr);
                 TankInfo discoveredTank;

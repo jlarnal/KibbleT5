@@ -1,12 +1,17 @@
 #ifndef TANKMANAGER_HPP
 #define TANKMANAGER_HPP
 
-#include <OneWire.h>
 #include <string>
 #include <vector>
 #include "OneWireEEPROM.hpp"
 #include "ServoController.hpp"
 #include "freertos/semphr.h"
+#include "board_pinout.h"
+
+// Use extern "C" to link the C library in a C++ project
+extern "C" {
+    #include "1wire.h"
+}
 
 // Forward-declare DeviceState to break circular dependency.
 struct DeviceState;
@@ -57,8 +62,8 @@ private:
     SemaphoreHandle_t& _mutex;
     ServoController* _servoController;
     
-    // A single OneWire instance for the multiplexer's common pin.
-    OneWire* _bus;
+    // A handle to the C 1-Wire driver instance.
+    OneWireConfig_t owCfg;
     OneWireEEPROM* _eepromController;
 
     // A dedicated mutex to protect 1-Wire bus transactions.

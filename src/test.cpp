@@ -3,6 +3,8 @@
 #include "test.h"
 #include "board_pinout.h"
 #include "esp_log.h"
+//#include <hal/gpio_ll.h>
+#include <hal/gpio_hal.h>
 
 static const char* TAG = "DebugTest";
 
@@ -197,17 +199,20 @@ void servoTestMenu(ServoController& servoController)
 
 void lowLevelOneWireMenu()
 {
-    bool testing = true;
-    while (testing) {
-        Serial.println("\n--- Low-Level 1-Wire MUX Menu ---");
-        Serial.println("1. Toggle MUX VCC Pin ON (HIGH)");
-        Serial.println("2. Toggle MUX VCC Pin OFF (LOW)");
-        Serial.println("3. Enable MUX (!E Pin LOW)");
-        Serial.println("4. Disable MUX (!E Pin HIGH)");
-        Serial.println("5. Set MUX Channel (0-5)");
-        Serial.println("q. Back to 1-Wire Menu");
-        Serial.print("Enter choice: ");
+    bool testing = true, dataPinHigh = false, vccPinHigh = false, printMenu = true;
 
+    while (testing) {
+        if (printMenu) {
+            printMenu = false;
+            Serial.println("\n--- Low-Level 1-Wire MUX Menu ---");
+            Serial.println("0-7 Select MUX channel");
+            Serial.println("V. Toggle MUX VCC Pin");
+            Serial.println("E. Toggle !E pin");
+            Serial.println("Z. Toggle data pin");
+            Serial.println("h. Recall this menu's printout");
+            Serial.println("q. Back to 1-Wire Menu");
+            Serial.print("Enter choice: ");
+        }
         flushSerialInputBuffer();
         while (!Serial.available()) {
             vTaskDelay(pdMS_TO_TICKS(50));
@@ -215,38 +220,71 @@ void lowLevelOneWireMenu()
         char choice = Serial.read();
         Serial.print(choice);
         Serial.println();
+        pinMode(ONEWIRE_MUX_VCC_Pin, OUTPUT);
+        pinMode(ONEWIRE_MUX_notEnablePin, OUTPUT);
+        pinMode(ONEWIRE_MUX_S0_Pin, OUTPUT);
+        pinMode(ONEWIRE_MUX_S1_Pin, OUTPUT);
+        pinMode(ONEWIRE_MUX_S2_Pin, OUTPUT);
+        pinMode(ONEWIRE_MUX_DataPin, OUTPUT_OPEN_DRAIN);
+        gpio_hal_context_t GPIO_HAL = { .dev = GPIO_HAL_GET_HW(GPIO_PORT_0) };
 
         switch (choice) {
+            case '0':
+            [[fallthrough]]
             case '1':
-                Serial.println("Setting ONEWIRE_MUX_VCC_Pin HIGH.");
-                digitalWrite(ONEWIRE_MUX_VCC_Pin, HIGH);
-                break;
+            [[fallthrough]]
             case '2':
-                Serial.println("Setting ONEWIRE_MUX_VCC_Pin LOW.");
-                digitalWrite(ONEWIRE_MUX_VCC_Pin, LOW);
-                break;
+            [[fallthrough]]
             case '3':
-                Serial.println("Setting ONEWIRE_MUX_notEnablePin LOW (Mux Enabled).");
-                digitalWrite(ONEWIRE_MUX_notEnablePin, LOW);
-                break;
+            [[fallthrough]]
             case '4':
-                Serial.println("Setting ONEWIRE_MUX_notEnablePin HIGH (Mux Disabled).");
-                digitalWrite(ONEWIRE_MUX_notEnablePin, HIGH);
-                break;
+            [[fallthrough]]
             case '5':
+            [[fallthrough]]
+            case '6':
+            [[fallthrough]]
+            case '7':
                 {
-                    Serial.print("Enter MUX Channel (0-5): ");
-                    int channel = readSerialInt();
-                    if (channel < 0 || channel > 5) {
-                        Serial.println("Invalid channel.");
-                        break;
-                    }
-                    Serial.printf("Setting MUX to channel %d\n", channel);
-                    digitalWrite(ONEWIRE_MUX_S0_Pin, (channel & 1) ? HIGH : LOW);
-                    digitalWrite(ONEWIRE_MUX_S1_Pin, (channel & 2) ? HIGH : LOW);
-                    digitalWrite(ONEWIRE_MUX_S2_Pin, (channel & 4) ? HIGH : LOW);
-                    break;
+                    int chan = choice - '0';
+
+                    Serial.printf("Chaging MUX selection to ch#%d.\n", chan);
+                    digitalWrite(ONEWIRE_MUX_S0_Pin, (chan & 1 ? HIGH : LOW));
+                    digitalWrite(ONEWIRE_MUX_S1_Pin, (chan & 2 ? HIGH : LOW));
+                    digitalWrite(ONEWIRE_MUX_S2_Pin, (chan & 4 ? HIGH : LOW));
                 }
+                break;
+            case 'e':
+            [[falltrough]]
+            case 'E':
+                pinMode(ONEWIRE_MUX_notEnablePin, OUTPUT);
+                vccPinHigh = !vccPinHigh;
+                digitalWrite(ONEWIRE_MUX_notEnablePin, (vccPinHigh ? HIGH : LOW));
+                Serial.printf("Toggled !E pin to %s\n", (vccPinHigh ? "HIGH" : "LOW"));
+                break;
+            case 'v':
+            [[falltrough]]
+            case 'V':
+                pinMode(ONEWIRE_MUX_VCC_Pin, OUTPUT);
+                vccPinHigh = !vccPinHigh;
+                digitalWrite(ONEWIRE_MUX_VCC_Pin, (vccPinHigh ? HIGH : LOW));
+                Serial.printf("Toggled VCC pin to %s\n", (vccPinHigh ? "HIGH" : "LOW"));
+                break;
+            case 'h':
+            [[fallthrough]]
+            case 'H':
+                printMenu = true;
+                break;
+            case 'z':
+            [[fallthrough]]
+            case 'Z':
+                dataPinHigh = !dataPinHigh;
+
+                pinMode(ONEWIRE_MUX_DataPin, OUTPUT_OPEN_DRAIN);
+                digitalWrite(ONEWIRE_MUX_DataPin, (dataPinHigh ? HIGH : LOW));
+                vTaskDelay(1);
+                Serial.printf("Setting Data pin #%d to %s (%c)\n", ONEWIRE_MUX_DataPin, (dataPinHigh ? "HIGH" : "LOW"),
+                  (digitalRead(ONEWIRE_MUX_DataPin) ? '1' : '0'));
+                break;
             case 'q':
             [[fallthrough]]
             case 'Q':
