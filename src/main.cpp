@@ -91,7 +91,8 @@ void setup()
 
         ESP_LOGI(TAG, "IP address is %s", WiFi.localIP().toString().c_str());
         ArduinoOTA.begin();
-        
+        xTaskCreate(battAndOTA_Task, "Batt monitor", 3192, &battMon, 10, NULL);
+
 
         webServer.startAPIServer();
 
@@ -101,12 +102,10 @@ void setup()
 
         timeKeeping.startTask();
         tankManager.startTask();
-        scale.startTask();
         display.startTask();
         safetySystem.startTask();
-
+        scale.startTask();
         xTaskCreate(feedingTask, "Feeding Task", 4096, &recipeProcessor, 10, NULL);
-        xTaskCreate(battAndOTA_Task, "Batt monitor", 2048, &battMon, tskIDLE_PRIORITY, NULL);
         ESP_LOGI(TAG, "--- Setup Complete, System Operational ---");
     } else {
         ESP_LOGE(TAG, "Fatal: WiFi could not be configured. Halting.");
@@ -121,14 +120,19 @@ void battAndOTA_Task(void* pvParameters)
     if (pvParameters == nullptr) {
         ESP_LOGE(TAG, "Battery object pointer was null in `batteryTask`");
         return;
+    } else {
+        ESP_LOGI(TAG, "Battery manager running.");
+        Serial.flush();
     }
 
     Battery* pBatt = (Battery*)pvParameters;
-    pBatt->begin(3300, 2.0f, asigmoidal);
+    pBatt->begin(3300, 0.5f, asigmoidal);
 
     for (;;) {
 
         globalDeviceState.batteryLevel = pBatt->level();
+        Serial.printf("Battery level: %d%% (%dmV) - ", pBatt->level(), pBatt->voltage());
+        Serial.printf("Raw measure: %dmv\n", 2 * analogReadMilliVolts(BATT_HALFV_PIN));
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }

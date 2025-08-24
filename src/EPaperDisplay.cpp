@@ -4,6 +4,7 @@
 #include <qrcode.h>
 #include <Fonts/FreeSansBold9pt7b.h>
 #include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/Picopixel.h>
 
 static const char* TAG              = "EPaperDisplay";
 static const int AP_QR_CODE_VERSION = 3;
@@ -20,7 +21,7 @@ bool EPaperDisplay::begin()
 {
     // Create the display instance with the proper dimensions
     // Adafruit_SSD1680(width, height, DC, RST, CS, SRCS, BUSY, SPI)
-    _display = new Adafruit_SSD1680(296, 152, EPD_DC, EPD_RST, EPD_CS, -1, EPD_BUSY, &SPI);
+    _display = new Ssd1680_Driver(296, 152, EPD_DC, EPD_RST, EPD_CS, -1, EPD_BUSY, &SPI);
 
     _display->begin();
     // Set rotation to 1 for PORTRAIT mode (152x296)
@@ -232,6 +233,14 @@ void EPaperDisplay::_updateDisplay()
     }
 
     _clearDisplay();
+    _display->setFont(&Picopixel);
+    _display->setTextSize(2);
+    _display->setCursor(_display->width() - 32, 11);
+    _display->print(_deviceState.batteryLevel);
+    _display->print('%');
+    
+ 
+    _display->setTextSize(1);
     _display->setFont(&FreeSans9pt7b);
 
     // Header

@@ -4,11 +4,14 @@
 
 static const char* TAG = "TimeKeeping";
 
+static const char* TimeZoneQueryURL = "http://ip-api.com/line/?fields=33554688"; // Request public IP's timezone and time offset
+
 TimeKeeping::TimeKeeping(DeviceState& deviceState, SemaphoreHandle_t& mutex, ConfigManager& configManager)
     : _deviceState(deviceState), _mutex(mutex), _configManager(configManager) {}
 
 void TimeKeeping::begin() {
-    std::string tz = _configManager.loadTimezone();
+    
+    std::string tz = "Europe/Paris"; //_configManager.loadTimezone();
     // Set the timezone environment variable. This is used by the underlying time functions.
     setenv("TZ", tz.c_str(), 1);
     tzset();
@@ -16,7 +19,7 @@ void TimeKeeping::begin() {
     // Start NTP synchronization
     // The first parameter is the primary NTP server, the second is the secondary.
     // The third parameter is the timezone string, but we set it via environment variable for wider compatibility.
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    configTime(7200, 0, "pool.ntp.org", "time.nist.gov");
     ESP_LOGI(TAG, "NTP service configured. Timezone: %s", tz.c_str());
 }
 

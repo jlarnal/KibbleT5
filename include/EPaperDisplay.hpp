@@ -2,9 +2,9 @@
 #define EPAPERDISPLAY_HPP
 
 #include "DeviceState.hpp"
-#include <Adafruit_EPD.h>
-#include <Adafruit_GFX.h>
+#include <SSD1680Driver.h>
 #include <SPI.h>
+
 
 /**
  * @file EPaperDisplay.hpp
@@ -31,7 +31,7 @@ private:
 
 
     
-    Adafruit_SSD1680* _display;
+    Ssd1680_Driver* _display;
 
     void _updateDisplay();
     static void _displayTask(void *pvParameters);
