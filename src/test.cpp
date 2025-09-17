@@ -197,114 +197,16 @@ void servoTestMenu(ServoController& servoController)
     }
 }
 
-void lowLevelOneWireMenu()
-{
-    bool testing = true, dataPinHigh = false, vccPinHigh = false, printMenu = true;
 
-    while (testing) {
-        if (printMenu) {
-            printMenu = false;
-            Serial.println("\n--- Low-Level 1-Wire MUX Menu ---");
-            Serial.println("0-7 Select MUX channel");
-            Serial.println("V. Toggle MUX VCC Pin");
-            Serial.println("E. Toggle !E pin");
-            Serial.println("Z. Toggle data pin");
-            Serial.println("h. Recall this menu's printout");
-            Serial.println("q. Back to 1-Wire Menu");
-            Serial.print("Enter choice: ");
-        }
-        flushSerialInputBuffer();
-        while (!Serial.available()) {
-            vTaskDelay(pdMS_TO_TICKS(50));
-        }
-        char choice = Serial.read();
-        Serial.print(choice);
-        Serial.println();
-        pinMode(ONEWIRE_MUX_VCC_Pin, OUTPUT);
-        pinMode(ONEWIRE_MUX_notEnablePin, OUTPUT);
-        pinMode(ONEWIRE_MUX_S0_Pin, OUTPUT);
-        pinMode(ONEWIRE_MUX_S1_Pin, OUTPUT);
-        pinMode(ONEWIRE_MUX_S2_Pin, OUTPUT);
-        pinMode(ONEWIRE_MUX_DataPin, OUTPUT_OPEN_DRAIN);
-        gpio_hal_context_t GPIO_HAL = { .dev = GPIO_HAL_GET_HW(GPIO_PORT_0) };
-
-        switch (choice) {
-            case '0':
-            [[fallthrough]]
-            case '1':
-            [[fallthrough]]
-            case '2':
-            [[fallthrough]]
-            case '3':
-            [[fallthrough]]
-            case '4':
-            [[fallthrough]]
-            case '5':
-            [[fallthrough]]
-            case '6':
-            [[fallthrough]]
-            case '7':
-                {
-                    int chan = choice - '0';
-
-                    Serial.printf("Chaging MUX selection to ch#%d.\n", chan);
-                    digitalWrite(ONEWIRE_MUX_S0_Pin, (chan & 1 ? HIGH : LOW));
-                    digitalWrite(ONEWIRE_MUX_S1_Pin, (chan & 2 ? HIGH : LOW));
-                    digitalWrite(ONEWIRE_MUX_S2_Pin, (chan & 4 ? HIGH : LOW));
-                }
-                break;
-            case 'e':
-            [[falltrough]]
-            case 'E':
-                pinMode(ONEWIRE_MUX_notEnablePin, OUTPUT);
-                vccPinHigh = !vccPinHigh;
-                digitalWrite(ONEWIRE_MUX_notEnablePin, (vccPinHigh ? HIGH : LOW));
-                Serial.printf("Toggled !E pin to %s\n", (vccPinHigh ? "HIGH" : "LOW"));
-                break;
-            case 'v':
-            [[falltrough]]
-            case 'V':
-                pinMode(ONEWIRE_MUX_VCC_Pin, OUTPUT);
-                vccPinHigh = !vccPinHigh;
-                digitalWrite(ONEWIRE_MUX_VCC_Pin, (vccPinHigh ? HIGH : LOW));
-                Serial.printf("Toggled VCC pin to %s\n", (vccPinHigh ? "HIGH" : "LOW"));
-                break;
-            case 'h':
-            [[fallthrough]]
-            case 'H':
-                printMenu = true;
-                break;
-            case 'z':
-            [[fallthrough]]
-            case 'Z':
-                dataPinHigh = !dataPinHigh;
-
-                pinMode(ONEWIRE_MUX_DataPin, OUTPUT_OPEN_DRAIN);
-                digitalWrite(ONEWIRE_MUX_DataPin, (dataPinHigh ? HIGH : LOW));
-                vTaskDelay(1);
-                Serial.printf("Setting Data pin #%d to %s (%c)\n", ONEWIRE_MUX_DataPin, (dataPinHigh ? "HIGH" : "LOW"),
-                  (digitalRead(ONEWIRE_MUX_DataPin) ? '1' : '0'));
-                break;
-            case 'q':
-            [[fallthrough]]
-            case 'Q':
-                testing = false;
-                break;
-            default:
-                Serial.println("Invalid choice.");
-                break;
-        }
-    }
-}
-
-void oneWireTestMenu(TankManager& tankManager)
+void swiMuxMenu(TankManager& tankManager)
 {
     bool testing = true;
     while (testing) {
-        Serial.println("\n--- 1-Wire Bus Test Menu ---");
-        Serial.println("1. Scan a specific bus (0-5)");
-        Serial.println("2. Scan all buses sequentially");
-        Serial.println("3. Low-Level Mode (Direct MUX Control)");
+        Serial.println("\n--- SwiMux Test Menu ---");
+        Serial.println("1. Awaken the SwiMux (tests for readyness)");
+        Serial.println("2. Scan a specific bus (0-5)");
+        Serial.println("3. Scan all buses sequentially");
+        Serial.println("4. Put SwiMux to sleep");
         Serial.println("q. Back to Main Menu");
         Serial.print("Enter choice: ");
 
@@ -318,31 +220,58 @@ void oneWireTestMenu(TankManager& tankManager)
 
         switch (choice) {
             case '1':
+                if (tankManager.testSwiMuxAwaken()) {
+                    Serial.println("The SwiMux interface said it's awake.");
+                } else {
+                    Serial.println("No response from the SwiMux interface !");
+                }
+                break;
+
+            case '2':
                 {
-                    Serial.print("Enter bus number (0-5): ");
-                    int busNum = readSerialInt();
-                    if (busNum < 0 || busNum > 5) {
-                        Serial.println("Invalid bus number.");
+                    Serial.print("Enter bus number to scan [0..5]:>");
+                    int busIndex = readSerialInt();
+                    Serial.println(busIndex);
+                    if (busIndex < 0 || busIndex > 5) {
+                        Serial.println("Wrong bus index.");
                         break;
                     }
-                    tankManager.testBus(busNum);
-                    break;
-                }
-            case '2':
-                Serial.println("Scanning all buses sequentially...");
-                for (int i = 0; i < 6; i++) {
-                    tankManager.testBus(i);
-                    vTaskDelay(pdMS_TO_TICKS(100));
+                    Serial.printf("Scanning SwiMux bus #%d...", busIndex);
+                    uint64_t uid;
+                    if (tankManager.testSwiBusUID(busIndex, uid)) {
+                        Serial.printf(" uid read: %08x%08x\r\n", (uint32_t)(uid >> 32), (uint32_t)(uid & UINT32_MAX));
+                    } else {
+                        Serial.println("no response.");
+                    }
                 }
                 break;
+
             case '3':
-                lowLevelOneWireMenu();
+                {
+                    Serial.println("Scanning all SwiMux buses (0 to 5):");
+                    for (int i = 0; i < 6; i++) {
+                        uint64_t uid;
+                        if (tankManager.testSwiBusUID(i, uid)) {
+                            Serial.printf("\t[Bus #%d] uid read: %08x%08x\r\n", i, (uint32_t)(uid >> 32), (uint32_t)(uid & UINT32_MAX));
+                        } else {
+                            Serial.printf("\t[Bus #%d] no response.", i);
+                        }
+                        vTaskDelay(pdMS_TO_TICKS(100));
+                    }
+                }
                 break;
+
+            case '4':
+                Serial.println("Putting SwiMux interface to sleep.");
+                tankManager.disableSwiMux();
+                break;
+
             case 'q':
-            [[fallthrough]]
+                [[fallthrough]];
             case 'Q':
                 testing = false;
                 break;
+
             default:
                 Serial.println("Invalid choice.");
                 break;
@@ -488,9 +417,8 @@ void doDebugTest(ServoController& servoController, TankManager& tankManager, HX7
     while (testing) {
         Serial.println("\n--- Main Test Menu ---");
         Serial.println("1. Servo Tests (PCA9685)");
-        Serial.println("2. 1-Wire Bus Tests (AT21CS01)");
+        Serial.println("2. SwiMux tests (AT21CS01 chips through a CH32V003)");
         Serial.println("3. Scale Tests (HX711)");
-        Serial.println("4. Low-Level GPIO Tests");
         Serial.println("q. Quit and Resume Operation");
         Serial.print("Enter choice: ");
 
@@ -507,13 +435,10 @@ void doDebugTest(ServoController& servoController, TankManager& tankManager, HX7
                 servoTestMenu(servoController);
                 break;
             case '2':
-                oneWireTestMenu(tankManager);
+                swiMuxMenu(tankManager);
                 break;
             case '3':
                 scaleTestMenu(scale);
-                break;
-            case '4':
-                lowLevelOneWireMenu();
                 break;
             case 'q':
                 testing = false;

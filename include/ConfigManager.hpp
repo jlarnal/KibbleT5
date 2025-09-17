@@ -9,7 +9,7 @@
 
 // Struct for a single ingredient in a recipe
 struct RecipeIngredient {
-    std::string tankUid;
+    uint64_t tankUid;
     // Changed to store the ingredient's mix ratio as a percentage.
     float percentage;
 };

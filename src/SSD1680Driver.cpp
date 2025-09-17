@@ -45,77 +45,7 @@ static const uint8_t ssd1680_custom_init_code[] {
         0x32, 0x00, 0x00, 0x00, 0x00, 0x00, // FR[n]
         0    , 0    , 0    , // XON[n]
     #endif
-        /*
-    SSD1680_WRITE_LUT, 153,
-        0x40, 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , // L0 (BKBK) groups [0..11]
-        0x80, 0x80, 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , // L1 (BKWH)
-        0x40, 0x40, 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , // L2 (WHBK)
-        0    , 0x80, 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , // L3 (WHWK)
-        0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , 0    , // L4 (not used)
-        0x0A, 0    , 0    , 0    , 0    , 0    , 0x02, // Group #0 timing  
-        0x01, 0    , 0    , 0    , 0    , 0    , 0    , // Group #1 timing 
-        0x01, 0    , 0    , 0    , 0    , 0    , 0    , // Group #2 timing 
-        0    , 0    , 0    , 0    , 0    , 0    , 0    , // Group #3 timing 
-        0    , 0    , 0    , 0    , 0    , 0    , 0    , // Group #4 timing 
-        0    , 0    , 0    , 0    , 0    , 0    , 0    , // Group #5 timing  
-        0    , 0    , 0    , 0    , 0    , 0    , 0    , // Group #6 timing  
-        0    , 0    , 0    , 0    , 0    , 0    , 0    , // Group #7 timing  
-        0    , 0    , 0    , 0    , 0    , 0    , 0    , // Group #8 timing  
-        0    , 0    , 0    , 0    , 0    , 0    , 0    , // Group #9 timing  
-        0    , 0    , 0    , 0    , 0    , 0    , 0    , // Group #10 timing  
-        0    , 0    , 0    , 0    , 0    , 0    , 0    , // Group #11 timing 
-        0x77, 0x77, 0x77, 0x77, 0x77, 0x77, // FR[n]
-        0    , 0    , 0    , // XON[n]
-
-*/
-
-
- /*
-    SSD1680_WRITE_LUT, 70,
-    0x80, 0x48, 0x40, 0    , 0    , 0    , 0    ,
-    0x40, 0x48, 0x80, 0    , 0    , 0    , 0    ,
-    0x80, 0x48, 0x40, 0    , 0    , 0    , 0    ,
-    0x40, 0x48, 0x80, 0    , 0    , 0    , 0    ,
-    0    , 0    , 0    , 0    , 0    , 0    , 0    ,
-    0x01, 0x01, 0    , 0    , 0x03,
-    0x05, 0x05, 0    , 0    , 0x03,
-    0x01, 0x01, 0    , 0    , 0x03,
-    0    , 0    , 0    , 0    , 0    ,
-    0    , 0    , 0    , 0    , 0    ,
-    0    , 0    , 0    , 0    , 0    ,
-    0    , 0    , 0    , 0    , 0    ,
-    
-*/
-    /*
-    // 0–152: Waveform LUT
-    // Grouped by 5 blocks: VCOM, WW, BW, WB, BB (each 30 bytes)
-    // VCOM
-    0    ,0x08,0x08,0x02,0x02,0x0A,0x04,0x10,0x08,0x08,
-    0x02,0x02,0x0A,0x04,0x10,0x08,0x08,0x02,0x02,0x0A,
-    0x04,0x10,0x08,0x08,0x02,0x02,0x0A,0x04,0x10,0    ,
-
-    // WW (white-to-white)
-    0    ,0    ,0    ,0    ,0    ,0    ,0    ,0    ,0    ,0    ,
-    0    ,0    ,0    ,0    ,0    ,0    ,0    ,0    ,0    ,0    ,
-    0    ,0    ,0    ,0    ,0    ,0    ,0    ,0    ,0    ,0    ,
-
-    // BW (black-to-white)
-    0x40,0x08,0x08,0x02,0x02,0x0A,0x04,0x10,0x08,0x08,
-    0x02,0x02,0x0A,0x04,0x10,0x08,0x08,0x02,0x02,0x0A,
-    0x04,0x10,0x08,0x08,0x02,0x02,0x0A,0x04,0x10,0    ,
-
-    // WB (white-to-black)
-    0x80,0x08,0x08,0x02,0x02,0x0A,0x04,0x10,0x08,0x08,
-    0x02,0x02,0x0A,0x04,0x10,0x08,0x08,0x02,0x02,0x0A,
-    0x04,0x10,0x08,0x08,0x02,0x02,0x0A,0x04,0x10,0    ,
-
-    // BB (black-to-black)
-    0    ,0x08,0x08,0x02,0x02,0x0A,0x04,0x10,0x08,0x08,
-    0x02,0x02,0x0A,0x04,0x10,0x08,0x08,0x02,0x02,0x0A,
-    0x04,0x10,0x08,0x08,0x02,0x02,0x0A,0x04,0x10,0    ,
-
-
-*/
+  
 
     SSD1680_SET_RAMXCOUNT, 1, 1, 
     SSD1680_SET_RAMYCOUNT, 2, 0, 0, 
@@ -143,7 +73,7 @@ void Ssd1680_Driver::powerUp()
     if ((height % 8) != 0) {
         height += 8 - (height % 8);
     }
-
+    
     // Set ram X start/end postion
     buf[0] = _xram_offset;
     buf[1] = height / 8 - 1 + _xram_offset;

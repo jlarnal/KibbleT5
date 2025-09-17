@@ -13,14 +13,14 @@
  */
 
 class RecipeProcessor {
-public:
-    RecipeProcessor(DeviceState& deviceState, SemaphoreHandle_t& mutex, ConfigManager& configManager, 
-                    TankManager& tankManager, ServoController& servoController, HX711Scale& scale);
-    
+  public:
+    RecipeProcessor(DeviceState& deviceState, SemaphoreHandle_t& mutex, ConfigManager& configManager, TankManager& tankManager,
+      ServoController& servoController, HX711Scale& scale);
+
     void begin();
 
     // These methods are called by the central feeding task
-    bool executeImmediateFeed(const std::string& tankUid, float targetWeight);
+    bool executeImmediateFeed(const uint64_t tankUid, float targetWeight);
     // Updated to accept the number of servings to dispense, defaulting to 1.
     bool executeRecipeFeed(int recipeId, int servings = 1);
     void stopAllFeeding();
@@ -35,7 +35,7 @@ public:
     // Provide access to the scale for taring
     HX711Scale& getScale();
 
-private:
+  private:
     DeviceState& _deviceState;
     SemaphoreHandle_t& _mutex;
     ConfigManager& _configManager;
@@ -47,7 +47,7 @@ private:
 
     void _loadRecipesFromNVS();
     void _saveRecipesToNVS();
-    bool _dispenseIngredient(const std::string& tankUid, float targetWeight);
+    bool _dispenseIngredient(const uint64_t tankUid, float targetWeight);
 };
 
 #endif // RECIPEPROCESSOR_HPP

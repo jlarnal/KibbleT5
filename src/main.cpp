@@ -8,7 +8,6 @@
 #include "ConfigManager.hpp"
 #include "TimeKeeping.hpp"
 #include "board_pinout.h"
-#include "OneWireEEPROM.hpp"
 #include "TankManager.hpp"
 #include "ServoController.hpp"
 #include "HX711Scale.hpp"
@@ -95,17 +94,15 @@ void setup()
 
 
         webServer.startAPIServer();
-
         timeKeeping.begin();
-
         recipeProcessor.begin();
-
         timeKeeping.startTask();
-        tankManager.startTask();
         display.startTask();
         safetySystem.startTask();
-        scale.startTask();
+        scale.startTask();        
         xTaskCreate(feedingTask, "Feeding Task", 4096, &recipeProcessor, 10, NULL);
+
+        
         ESP_LOGI(TAG, "--- Setup Complete, System Operational ---");
     } else {
         ESP_LOGE(TAG, "Fatal: WiFi could not be configured. Halting.");

@@ -235,6 +235,7 @@ void EPaperDisplay::_updateDisplay()
     _clearDisplay();
     _display->setFont(&Picopixel);
     _display->setTextSize(2);
+    
     _display->setCursor(_display->width() - 32, 11);
     _display->print(_deviceState.batteryLevel);
     _display->print('%');

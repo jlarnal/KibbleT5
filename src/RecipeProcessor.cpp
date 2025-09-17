@@ -4,22 +4,30 @@
 
 static const char* TAG = "RecipeProcessor";
 
-RecipeProcessor::RecipeProcessor(DeviceState& deviceState, SemaphoreHandle_t& mutex, ConfigManager& configManager, 
-                                 TankManager& tankManager, ServoController& servoController, HX711Scale& scale)
-    : _deviceState(deviceState), _mutex(mutex), _configManager(configManager), 
-      _tankManager(tankManager), _servoController(servoController), _scale(scale) {}
+RecipeProcessor::RecipeProcessor(DeviceState& deviceState, SemaphoreHandle_t& mutex, ConfigManager& configManager, TankManager& tankManager,
+  ServoController& servoController, HX711Scale& scale)
+    : _deviceState(deviceState),
+      _mutex(mutex),
+      _configManager(configManager),
+      _tankManager(tankManager),
+      _servoController(servoController),
+      _scale(scale)
+{}
 
-void RecipeProcessor::begin() {
+void RecipeProcessor::begin()
+{
     _loadRecipesFromNVS();
     ESP_LOGI(TAG, "Loaded %d recipes from NVS.", _recipes.size());
 }
 
-HX711Scale& RecipeProcessor::getScale() {
+HX711Scale& RecipeProcessor::getScale()
+{
     return _scale;
 }
 
-bool RecipeProcessor::executeImmediateFeed(const std::string& tankUid, float targetWeight) {
-    if (tankUid.empty()) {
+bool RecipeProcessor::executeImmediateFeed(const uint64_t tankUid, float targetWeight)
+{
+    if (tankUid == 0) {
         ESP_LOGE(TAG, "Immediate feed failed: No tank UID provided.");
         if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
             _deviceState.lastError = "No tank specified for feed.";
@@ -28,7 +36,7 @@ bool RecipeProcessor::executeImmediateFeed(const std::string& tankUid, float tar
         return false;
     }
 
-    ESP_LOGI(TAG, "Starting immediate feed of %.2fg from tank %s", targetWeight, tankUid.c_str());
+    ESP_LOGI(TAG, "Starting immediate feed of %.2fg from tank 0x%016x", targetWeight, tankUid);
     bool success = _dispenseIngredient(tankUid, targetWeight);
 
     // Log the immediate feeding event
@@ -37,13 +45,13 @@ bool RecipeProcessor::executeImmediateFeed(const std::string& tankUid, float tar
         _deviceState.feedingHistory.push_back(entry);
         xSemaphoreGive(_mutex);
     }
-    
+
     return success;
 }
 
-bool RecipeProcessor::executeRecipeFeed(int recipeId, int servings) {
-    auto it = std::find_if(_recipes.begin(), _recipes.end(), 
-        [recipeId](const Recipe& r){ return r.id == recipeId; });
+bool RecipeProcessor::executeRecipeFeed(int recipeId, int servings)
+{
+    auto it = std::find_if(_recipes.begin(), _recipes.end(), [recipeId](const Recipe& r) { return r.id == recipeId; });
 
     if (it == _recipes.end()) {
         ESP_LOGE(TAG, "Recipe feed failed: Recipe with ID %d not found.", recipeId);
@@ -53,7 +61,7 @@ bool RecipeProcessor::executeRecipeFeed(int recipeId, int servings) {
         }
         return false;
     }
-    
+
     Recipe& recipe = *it; // Get a reference to modify lastUsed
 
     if (recipe.servings <= 0) {
@@ -67,10 +75,10 @@ bool RecipeProcessor::executeRecipeFeed(int recipeId, int servings) {
 
     float singleServingWeight = recipe.dailyWeight / recipe.servings;
     ESP_LOGI(TAG, "Executing recipe '%s' for %d serving(s). Single serving weight: %.2fg", recipe.name.c_str(), servings, singleServingWeight);
-    
-    _scale.tare(); 
+
+    _scale.tare();
     float totalDispensed = 0;
-    bool overallSuccess = true;
+    bool overallSuccess  = true;
 
     for (const auto& ingredient : recipe.ingredients) {
         if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
@@ -80,17 +88,17 @@ bool RecipeProcessor::executeRecipeFeed(int recipeId, int servings) {
                 xSemaphoreGive(_mutex);
                 stopAllFeeding();
                 overallSuccess = false;
-                break; 
+                break;
             }
             xSemaphoreGive(_mutex);
         }
-        
+
         // Calculate the amount to dispense for this ingredient based on its percentage
         float amountToDispense = singleServingWeight * (ingredient.percentage / 100.0f) * servings;
 
-        ESP_LOGI(TAG, "Dispensing %.2fg from tank %s", amountToDispense, ingredient.tankUid.c_str());
+        ESP_LOGI(TAG, "Dispensing %.2fg from tank 0x%016x", amountToDispense, ingredient.tankUid);
         if (!_dispenseIngredient(ingredient.tankUid, amountToDispense)) {
-            ESP_LOGE(TAG, "Failed to dispense ingredient from tank %s. Aborting recipe.", ingredient.tankUid.c_str());
+            ESP_LOGE(TAG, "Failed to dispense ingredient from tank 0x%016x. Aborting recipe.", ingredient.tankUid);
             stopAllFeeding();
             overallSuccess = false;
             break;
@@ -105,7 +113,7 @@ bool RecipeProcessor::executeRecipeFeed(int recipeId, int servings) {
         recipe.lastUsed = time(nullptr);
         _saveRecipesToNVS();
     }
-    
+
     // Log the feeding event, whether it succeeded or failed
     if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
         FeedingHistoryEntry entry(time(nullptr), "recipe", recipe.id, overallSuccess, totalDispensed, recipe.name);
@@ -115,32 +123,33 @@ bool RecipeProcessor::executeRecipeFeed(int recipeId, int servings) {
     return overallSuccess;
 }
 
-bool RecipeProcessor::_dispenseIngredient(const std::string& tankUid, float targetWeight) {
-    uint8_t servoId = _tankManager.getOrdinalForTank(tankUid);
-    if (servoId == 255) {
-        ESP_LOGE(TAG, "Dispense failed: No servo found for tank UID %s", tankUid.c_str());
+bool RecipeProcessor::_dispenseIngredient(const uint64_t tankUid, float targetWeight)
+{
+    int8_t servoId = _tankManager.getBusOfTank(tankUid); // servoId and tank ordinal (bus index) are the same thing.
+    if (servoId < 0) {
+        ESP_LOGE(TAG, "Dispense failed: tank #0x%016x", tankUid);
         if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
-            _deviceState.lastError = "Servo not found for tank.";
+            _deviceState.lastError = "Tank not found.";
             xSemaphoreGive(_mutex);
         }
         return false;
     }
 
-    float initialWeight = _scale.getWeight();
+    float initialWeight   = _scale.getWeight();
     float dispensedWeight = 0;
-    
-    _servoController.setServoPower(true);
-    vTaskDelay(pdMS_TO_TICKS(100)); 
-    _servoController.setContinuousServo(servoId, 1.0f); 
 
-    const TickType_t timeout = pdMS_TO_TICKS(30000); 
-    TickType_t startTime = xTaskGetTickCount();
+    _servoController.setServoPower(true);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    _servoController.setContinuousServo(servoId, 1.0f);
+
+    const TickType_t timeout = pdMS_TO_TICKS(30000);
+    TickType_t startTime     = xTaskGetTickCount();
 
     while (dispensedWeight < targetWeight) {
         dispensedWeight = _scale.getWeight() - initialWeight;
 
         if (xTaskGetTickCount() - startTime > timeout) {
-            ESP_LOGE(TAG, "Dispense timed out for tank %s.", tankUid.c_str());
+            ESP_LOGE(TAG, "Dispense timed out for tank 0x%016x.", tankUid);
             if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
                 _deviceState.lastError = "Dispense operation timed out.";
                 xSemaphoreGive(_mutex);
@@ -161,57 +170,63 @@ bool RecipeProcessor::_dispenseIngredient(const std::string& tankUid, float targ
         }
 
         if (targetWeight - dispensedWeight < 5.0) {
-            _servoController.setContinuousServo(servoId, 0.2f); 
+            _servoController.setContinuousServo(servoId, 0.2f);
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 
-    _servoController.setContinuousServo(servoId, 0.0f); 
-    vTaskDelay(pdMS_TO_TICKS(500)); 
+    _servoController.setContinuousServo(servoId, 0.0f);
+    vTaskDelay(pdMS_TO_TICKS(500));
     _servoController.setServoPower(false);
 
-    ESP_LOGI(TAG, "Dispensed %.2fg (target %.2fg) from tank %s", dispensedWeight, targetWeight, tankUid.c_str());
+    ESP_LOGI(TAG, "Dispensed %.2fg (target %.2fg) from tank 0x%016x", dispensedWeight, targetWeight, tankUid);
     return true;
 }
 
-void RecipeProcessor::stopAllFeeding() {
+void RecipeProcessor::stopAllFeeding()
+{
     ESP_LOGW(TAG, "Stopping all servos.");
     _servoController.stopAllServos();
     _servoController.setServoPower(false);
 }
 
-void RecipeProcessor::_loadRecipesFromNVS() {
+void RecipeProcessor::_loadRecipesFromNVS()
+{
     _recipes = _configManager.loadRecipes();
 }
 
-void RecipeProcessor::_saveRecipesToNVS() {
+void RecipeProcessor::_saveRecipesToNVS()
+{
     _configManager.saveRecipes(_recipes);
 }
 
-bool RecipeProcessor::addRecipe(const Recipe& recipe) {
+bool RecipeProcessor::addRecipe(const Recipe& recipe)
+{
     int maxId = 0;
-    for(const auto& r : _recipes) {
-        if (r.id > maxId) maxId = r.id;
+    for (const auto& r : _recipes) {
+        if (r.id > maxId)
+            maxId = r.id;
     }
-    Recipe newRecipe = recipe;
-    newRecipe.id = maxId + 1;
-    newRecipe.created = time(nullptr); // Set creation timestamp
-    newRecipe.lastUsed = 0;            // Initialize lastUsed to 0
+    Recipe newRecipe   = recipe;
+    newRecipe.id       = maxId + 1;
+    newRecipe.created  = time(nullptr); // Set creation timestamp
+    newRecipe.lastUsed = 0; // Initialize lastUsed to 0
     _recipes.push_back(newRecipe);
     _saveRecipesToNVS();
     ESP_LOGI(TAG, "Added new recipe '%s' with ID %d", newRecipe.name.c_str(), newRecipe.id);
     return true;
 }
 
-bool RecipeProcessor::updateRecipe(const Recipe& recipe) {
+bool RecipeProcessor::updateRecipe(const Recipe& recipe)
+{
     for (auto& r : _recipes) {
         if (r.id == recipe.id) {
-            r.name = recipe.name;
+            r.name        = recipe.name;
             r.ingredients = recipe.ingredients;
             r.dailyWeight = recipe.dailyWeight;
-            r.servings = recipe.servings;
-            r.lastUsed = time(nullptr); // Update last used timestamp on modification
+            r.servings    = recipe.servings;
+            r.lastUsed    = time(nullptr); // Update last used timestamp on modification
             _saveRecipesToNVS();
             ESP_LOGI(TAG, "Updated recipe '%s' (ID %d)", r.name.c_str(), r.id);
             return true;
@@ -221,9 +236,9 @@ bool RecipeProcessor::updateRecipe(const Recipe& recipe) {
     return false;
 }
 
-bool RecipeProcessor::deleteRecipe(int recipeId) {
-    auto it = std::remove_if(_recipes.begin(), _recipes.end(), 
-        [recipeId](const Recipe& r){ return r.id == recipeId; });
+bool RecipeProcessor::deleteRecipe(int recipeId)
+{
+    auto it = std::remove_if(_recipes.begin(), _recipes.end(), [recipeId](const Recipe& r) { return r.id == recipeId; });
 
     if (it != _recipes.end()) {
         _recipes.erase(it, _recipes.end());
@@ -235,15 +250,17 @@ bool RecipeProcessor::deleteRecipe(int recipeId) {
     return false;
 }
 
-std::vector<Recipe> RecipeProcessor::getRecipes() {
+std::vector<Recipe> RecipeProcessor::getRecipes()
+{
     return _recipes;
 }
 
-Recipe RecipeProcessor::getRecipeById(int recipeId) {
+Recipe RecipeProcessor::getRecipeById(int recipeId)
+{
     for (const auto& r : _recipes) {
         if (r.id == recipeId) {
             return r;
         }
     }
-    return {-1, "Not Found", {}, 0, 0, 0, 0}; // Return a valid but 'not found' recipe
+    return { -1, "Not Found", {}, 0, 0, 0, 0 }; // Return a valid but 'not found' recipe
 }

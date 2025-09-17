@@ -16,7 +16,8 @@
  */
 
 // Enum for different feeding commands initiated by the user/API
-enum class FeedCommandType {
+enum class FeedCommandType
+{
     NONE,
     IMMEDIATE,
     RECIPE,
@@ -27,49 +28,50 @@ enum class FeedCommandType {
 // Struct to hold feeding command details from the API
 struct FeedCommand {
     FeedCommandType type = FeedCommandType::NONE;
-    std::string tankUid = ""; 
-    float amountGrams = 0.0;
-    int recipeId = 0;
-    int servings = 1; // Add the servings member
-    bool processed = true; 
+    uint64_t tankUid     = 0;
+    float amountGrams    = 0.0;
+    int recipeId         = 0;
+    int servings         = 1; // Add the servings member
+    bool processed       = true;
 };
 
 // Expanded to match the API schema for feeding history
 struct FeedingHistoryEntry {
     time_t timestamp;
     std::string type; // "recipe" or "immediate"
-    int recipeId; 
+    int recipeId;
     bool success;
     float amount;
     std::string description; // e.g., Recipe Name or "Immediate Feed"
 
     // Constructor to allow for direct initialization.
     FeedingHistoryEntry(time_t ts, const std::string& t, int rId, bool s, float a, const std::string& d)
-        : timestamp(ts), type(t), recipeId(rId), success(s), amount(a), description(d) {}
+        : timestamp(ts), type(t), recipeId(rId), success(s), amount(a), description(d)
+    {}
 };
 
 // The central volatile state structure for the entire application.
 struct DeviceState {
     // System Status
-    bool operational = true;
-    std::string lastError = "";
+    bool operational       = true;
+    std::string lastError  = "";
     bool safetyModeEngaged = false;
-    uint32_t uptime_s = 0;
-    int8_t wifiStrength = 0;
-    uint8_t batteryLevel = 100;
+    uint32_t uptime_s      = 0;
+    int8_t wifiStrength    = 0;
+    uint8_t batteryLevel   = 100;
     IPAddress ipAddress;
-    std::string deviceName = "KibbleT5";
+    std::string deviceName      = "KibbleT5";
     std::string firmwareVersion = "1.1.0-stable";
-    std::string buildDate = __DATE__;
-    
+    std::string buildDate       = __DATE__;
+
     // Time
-    time_t currentTime = 0;
+    time_t currentTime     = 0;
     char formattedTime[20] = "TIME_NOT_SET";
 
     // Scale
-    float currentWeight = 0.0;
+    float currentWeight  = 0.0;
     long currentRawValue = 0;
-    bool isWeightStable = false;
+    bool isWeightStable  = false;
 
     // Tanks
     std::vector<TankInfo> connectedTanks;

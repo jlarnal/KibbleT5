@@ -184,7 +184,7 @@ std::vector<Recipe> ConfigManager::loadRecipes() {
                 JsonArray array = doc.as<JsonArray>();
                 for (JsonObject recipeObj : array) {
                     Recipe recipe;
-                    recipe.id = recipeObj["id"];
+                    recipe.id = recipeObj["id"].as<std::uint64_t>();
                     recipe.name = recipeObj["name"].as<std::string>();
                     recipe.dailyWeight = recipeObj["dailyWeight"] | 0.0;
                     recipe.servings = recipeObj["servings"] | 1;
@@ -193,7 +193,7 @@ std::vector<Recipe> ConfigManager::loadRecipes() {
 
                     for (JsonObject ingObj : recipeObj["ingredients"].as<JsonArray>()) {
                         RecipeIngredient ing;
-                        ing.tankUid = ingObj["tankUid"].as<std::string>();
+                        ing.tankUid = ingObj["tankUid"].as<std::uint64_t>();
                         // Load the percentage value
                         ing.percentage = ingObj["percentage"] | 0.0f;
                         recipe.ingredients.push_back(ing);
