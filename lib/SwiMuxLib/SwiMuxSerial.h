@@ -2,7 +2,7 @@
 #define H_SWIMUX_SERIAL_H
 
 #include <HardwareSerial.h>
-#include "SwiMuxComms.hpp"
+#include <SwiMuxComms.hpp>
 
 enum SwiMuxResult_e
 {
