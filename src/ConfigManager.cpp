@@ -2,6 +2,7 @@
 #include "ArduinoJson.h"
 #include "esp_log.h"
 #include "ServoController.hpp" // For default hopper values
+#include <cstdint>
 
 static const char* TAG = "ConfigManager";
 
