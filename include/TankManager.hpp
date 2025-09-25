@@ -16,16 +16,25 @@ class TankManager;
 
 /** @brief Data structure for the tank's EEPROM, and UID. */
 struct __attribute__((packed)) TankEEpromData_t {
-    struct __attribute__((packed)) {
-        uint8_t lastBaseMAC48[6]; // Last MAC48 of the KibbleT5 base this device was connected to.
-        uint8_t lastBusIndex; // Last bus index this device was connected to.
-    } history;
-    uint8_t nameLength; // The length of the string stored in the `name` field.
-    uint16_t capacity; // Capacity, in liters, as an unsigned Q3.13 number.
-    uint16_t density; // A Q2.14 unsigned fixed number for kibble density in kg/L.
-    uint16_t servoIdlePwm; // The PWM value (in microseconds) for the servo's idle position.
-    uint16_t remainingGrams; // Remaining kibble in grams, with redundancy.
-    char name[112]; // The name of the tank. In UTF-8 hopefully ?
+    struct __attribute__((packed)) _RECORD_ {
+        struct __attribute__((packed)) {
+            uint8_t lastBaseMAC48[6]; // Last MAC48 of the KibbleT5 base this device was connected to.
+            uint8_t lastBusIndex; // Last bus index this device was connected to.
+        } history;
+        uint8_t nameLength; // The length of the string stored in the `name` field.
+        uint16_t capacity; // Capacity, in liters, as an unsigned Q3.13 number.
+        uint16_t density; // A Q2.14 unsigned fixed number for kibble density in kg/L.
+        uint16_t servoIdlePwm; // The PWM value (in microseconds) for the servo's idle position.
+        uint16_t remainingGrams; // Remaining kibble in grams, with redundancy.
+        char name[44]; // The name of the tank. In UTF-8 hopefully ?
+        uint32_t crc; // ends up on byte 60, right on a DWORD alignment.
+    } records[2];
+    static void finalize(TankEEpromData_t& eedata, uint8_t recordToKeep = 0);
+    static uint32_t getCrc32(TankEEpromData_t& eedata, uint8_t recordIndex = 0);
+    static bool sanitize(TankEEpromData_t& eedata);
+    static void make_crc32(uint32_t& crc, const uint8_t val);
+    static uint32_t constexpr CRC_INIT_VALUE     = 0xFFFFFFFFUL;
+    static size_t constexpr CRC_COMPUTATION_SPAN = sizeof(TankEEpromData_t::_RECORD_) - sizeof(TankEEpromData_t::_RECORD_::crc);
 };
 
 /**
@@ -54,7 +63,7 @@ struct TankInfo {
 
     TankInfo()
         : uid(0ULL),
-          lastBaseMAC48{ 0, 0, 0, 0, 0, 0 },
+          lastBaseMAC48 { 0, 0, 0, 0, 0, 0 },
           name(""),
           busIndex(-1),
           isFullInfo(false),
@@ -92,14 +101,19 @@ class TankManager {
   public:
     // Constructor now takes ServoController directly.
     TankManager(DeviceState& deviceState, SemaphoreHandle_t& mutex, ServoController* servoController)
-        : _deviceState(deviceState), _mutex(mutex), _servoController(servoController), _memMux(Serial1, SWIMUX_TX_PIN, SWIMUX_RX_PIN)
-    {}
+        : _deviceState(deviceState), _servoController(servoController), _swiMux(SWIMUX_SERIAL_DEVICE, SWIMUX_TX_PIN, SWIMUX_RX_PIN), _lastPresenceReport { 0, 0 }
+    {
+
+    }
 
     /** @brief Initialize the multiplexed OneWire setup but does not start the task. */
     void begin();
-    /** @brief Refreshes the local data about connected tanks, by interrogating them. Uses lazy update. */
-    void refresh() { fullRefresh(); }
+    /** @brief Refreshes the local data about connected tanks, by interrogating them. Uses lazy update.
+     * @param refreshMap <optional> bit map of the tanks to refresh.
+     */
+    void refresh(uint16_t refreshMap = 0xFFFF) { fullRefresh(); }
 
+    void startTask() { xTaskCreate(TankManager::_tankDetectionTask, "TankManager", 3 * 1024, this, 11, &TankManager::_runningTask); }
     /**
      * @brief Update both local memory and eeprom so that the amount of remaining kibble is set to a new value.
      * @param uid Uid of the tank to update.
@@ -132,14 +146,16 @@ class TankManager {
      * @brief Puts the SwiMux interface to sleep.
      * @return <true> if successful, <false> if no response from the SwiMux.
      */
-    inline bool disableSwiMux() { return _memMux.sleep(); }
+    inline bool disableSwiMux() { return _swiMux.sleep(); }
 
 
 
-    // Public method for the hardware test suite
-    bool testSwiMuxAwaken(), testSwiMuxSleep(), testSwiBusUID(uint8_t index, uint64_t& result);
-
-
+#ifdef SWIMUX_DEBUG_ENABLED
+    // Public methods for the hardware test suite
+    SwiMuxPresenceReport_t testSwiMuxAwaken();
+    bool testSwiMuxSleep(), testSwiBusUID(uint8_t index, uint64_t& result);
+    inline HardwareSerial& getSwiMuxPort() { return _swiMux.getSerialPort(); }
+#endif
 
   private:
     static constexpr uint32_t SWIMUX_POWERUP_DELAY_MS     = 100;
@@ -147,14 +163,15 @@ class TankManager {
 
 
     DeviceState& _deviceState;
-    SemaphoreHandle_t& _mutex;
     ServoController* _servoController;
+    static TaskHandle_t _runningTask;
 
     // A physical interface that let us address SWI memories (AT21CS01, 128 bytes) on 6 separate SWI buses. through a 57600B8N1 uart connection.
-    SwiMuxSerial_t _memMux;
-
+    SwiMuxSerial_t _swiMux;
+    SwiMuxPresenceReport_t _lastPresenceReport;
     // A dedicated mutex to protect SWI bus transactions.
     SemaphoreHandle_t _swimuxMutex;
+
 
     // Internal list of tanks, which holds the comprehensive state.
     std::vector<TankInfo> _knownTanks;
@@ -165,16 +182,16 @@ class TankManager {
     static inline double q2_14_to_double(uint16_t q_val) { return (double)q_val / 16384.0; }
     static inline uint16_t double_to_q2_14(double d_val) { return (uint16_t)(d_val * 16384.0); }
 
-    void presenceRefresh();
-    void fullRefresh();
+    void presenceRefresh(), fullRefresh();
+    static void _tankDetectionTask(void* pvParam);
 
-    /** @brief Selectively updates an eeprom through the _memMux adapter. 
+    /** @brief Selectively updates an eeprom through the _swiMux adapter. 
      * @param data Reference to the TankEEpromData_t to use as source.
      * @param updatesNeeded A combination of flags telling us which memory fields to update. 
      * @param forcedBusIndex [optional] By default, the bus to address is designated by @p data.busIndex . This parameter lets us ovveride this behavior.
      * @note The data structure in eeprom is identical to TankEEpromData_t, byte-for-byte. Thus, endianness and alignment is only relative to the host (this means us). The SwiMuxSerial_t can be seen as the simple, low-memory long-term storage it is. 
      * @remark This method will try to engage in the least amount of SwiMuxSerial_t::write transactions as possible (contiguous fields/fields groups to be updated will be written in one operation if possible). */
-    void updateEeprom(TankEEpromData_t& data, TankInfo::TankInfoDiscrepancies_e updatesNeeded, int8_t forcedBusIndex = -1);
+    bool updateEeprom(TankEEpromData_t& data, TankInfo::TankInfoDiscrepancies_e updatesNeeded, int8_t forcedBusIndex = -1);
 };
 
 #endif // TANKMANAGER_HPP

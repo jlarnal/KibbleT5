@@ -42,8 +42,9 @@ void battAndOTA_Task(void* pvParameters);
 void setup()
 {
     Serial.setTxBufferSize(1024);
+    Serial.setDebugOutput(true);
     Serial.begin(115200);
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    
     ESP_LOGI(TAG, "--- KibbleT5 Starting Up ---");
 
     xDeviceStateMutex = xSemaphoreCreateMutex();
@@ -93,16 +94,17 @@ void setup()
         xTaskCreate(battAndOTA_Task, "Batt monitor", 3192, &battMon, 10, NULL);
 
 
-        webServer.startAPIServer();
-        timeKeeping.begin();
-        recipeProcessor.begin();
-        timeKeeping.startTask();
-        display.startTask();
-        safetySystem.startTask();
-        scale.startTask();        
+        webServer.startAPIServer(); // 1
+        timeKeeping.begin(); // 2
+        timeKeeping.startTask(); // 4
+        safetySystem.startTask(); // 5
+        scale.startTask(); // 8
+        tankManager.startTask(); // 6
+        recipeProcessor.begin(); // 3
+        display.startTask(); // 7
         xTaskCreate(feedingTask, "Feeding Task", 4096, &recipeProcessor, 10, NULL);
 
-        
+
         ESP_LOGI(TAG, "--- Setup Complete, System Operational ---");
     } else {
         ESP_LOGE(TAG, "Fatal: WiFi could not be configured. Halting.");
@@ -110,7 +112,10 @@ void setup()
     }
 }
 
-void loop() { vTaskDelete(NULL); }
+void loop()
+{
+    vTaskDelete(NULL);
+}
 
 void battAndOTA_Task(void* pvParameters)
 {

@@ -57,6 +57,7 @@
         "typeinfo": "cpp",
         "gpio_hal.h": "c",
         "gpio_periph.h": "c",
-        "esp32-hal-gpio.h": "c"
+        "esp32-hal-gpio.h": "c",
+        "span": "cpp"
     }
 }

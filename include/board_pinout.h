@@ -17,8 +17,10 @@
 
 // The original ONE_WIRE_BUS is now multiplexed through a 74HC4051 (analog multiplexer)
 // This allows for up to 6 tanks, each on its own bus for identification.
-#define SWIMUX_TX_PIN (12)
+#define SWIMUX_SERIAL_DEVICE Serial2
+#define SWIMUX_TX_PIN (27)
 #define SWIMUX_RX_PIN (13)
+
 
 // Those two pins allow for communication with the HX711 strain gauge ADC.
 #define HX711_DATA_PIN  (15)

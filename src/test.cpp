@@ -19,7 +19,7 @@ static void flushSerialInputBuffer()
 }
 
 // Helper function to wait for and read an integer from Serial, with echo
-int readSerialInt()
+static int readSerialInt()
 {
     String input = "";
     while (true) {
@@ -40,7 +40,7 @@ int readSerialInt()
 }
 
 // Helper function to wait for and read a float from Serial, with echo
-float readSerialFloat()
+static float readSerialFloat()
 {
     String input = "";
     while (true) {
@@ -59,6 +59,48 @@ float readSerialFloat()
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
+
+/** @brief Convert any POD value to its binary representation String, omitting leading zeroes. */
+template <typename T> static String toBinaryString(const T& value)
+{
+    const uint8_t* bytes  = reinterpret_cast<const uint8_t*>(&value);
+    const size_t bitCount = sizeof(T) * 8;
+
+    // Locate highest set bit
+    int firstOne = -1;
+    for (int bit = bitCount - 1; bit >= 0; --bit) {
+        size_t byteIdx = bit / 8;
+#if BYTE_ORDER == LITTLE_ENDIAN
+        uint8_t b = bytes[byteIdx];
+#else
+        uint8_t b = bytes[sizeof(T) - 1 - byteIdx];
+#endif
+        if (b & (1 << (bit % 8))) {
+            firstOne = bit;
+            break;
+        }
+    }
+
+    if (firstOne < 0)
+        return String("0");
+
+    String result;
+    result.reserve(firstOne + 1);
+
+    // Emit bits MSB → LSB
+    for (int bit = firstOne; bit >= 0; --bit) {
+        size_t byteIdx = bit / 8;
+#if BYTE_ORDER == LITTLE_ENDIAN
+        uint8_t b = bytes[byteIdx];
+#else
+        uint8_t b = bytes[sizeof(T) - 1 - byteIdx];
+#endif
+        result += (b & (1 << (bit % 8))) ? '1' : '0';
+    }
+
+    return result;
+}
+
 
 
 // --- Test Sub-menus ---
@@ -102,7 +144,7 @@ void lowLevelServoMenu(ServoController& servoController)
                     break;
                 }
             case 'q':
-            [[fallthrough]]
+                [[fallthrough]];
             case 'Q':
                 testing = false;
                 break;
@@ -186,7 +228,7 @@ void servoTestMenu(ServoController& servoController)
                 lowLevelServoMenu(servoController);
                 break;
             case 'q':
-            [[fallthrough]]
+                [[fallthrough]];
             case 'Q':
                 testing = false;
                 break;
@@ -197,16 +239,19 @@ void servoTestMenu(ServoController& servoController)
     }
 }
 
-
+#ifdef SWIMUX_DEBUG_ENABLED
 void swiMuxMenu(TankManager& tankManager)
 {
     bool testing = true;
     while (testing) {
         Serial.println("\n--- SwiMux Test Menu ---");
-        Serial.println("1. Awaken the SwiMux (tests for readyness)");
+        Serial.println("1. Awaken the SwiMux (gets the presence map)");
         Serial.println("2. Scan a specific bus (0-5)");
         Serial.println("3. Scan all buses sequentially");
         Serial.println("4. Put SwiMux to sleep");
+#ifdef SWIMUX_DEBUG_ENABLED
+        Serial.println("5. Raw serial port access");
+#endif
         Serial.println("q. Back to Main Menu");
         Serial.print("Enter choice: ");
 
@@ -220,10 +265,14 @@ void swiMuxMenu(TankManager& tankManager)
 
         switch (choice) {
             case '1':
-                if (tankManager.testSwiMuxAwaken()) {
-                    Serial.println("The SwiMux interface said it's awake.");
-                } else {
-                    Serial.println("No response from the SwiMux interface !");
+                {
+                    SwiMuxPresenceReport_t res = { 0, 0 };
+                    if (res.busesCount) {
+                        Serial.printf("The SwiMux interface awake, %d tanks slots, %d tanks connected, map:%s.\r\n", res.busesCount,
+                          __builtin_popcount(res.presences), toBinaryString(res.presences).c_str());
+                    } else {
+                        Serial.println("No response from the SwiMux interface !");
+                    }
                 }
                 break;
 
@@ -266,6 +315,28 @@ void swiMuxMenu(TankManager& tankManager)
                 tankManager.disableSwiMux();
                 break;
 
+            case '5':
+                Serial.println("Swimux interface serial port open.");
+                Serial.println("Press \033[91m [Ctrl]+[Z] \033[0m to exit.");
+                {
+                    int outChar, inChar;
+                    HardwareSerial& swiPort = tankManager.getSwiMuxPort();
+                    do {
+                        outChar = Serial.read();
+                        if (outChar >= 0) {
+                            swiPort.print((char)outChar);
+                            Serial.print((char)outChar);
+                        }
+
+                        inChar = swiPort.read();
+                        if (inChar >= 0) {
+                            Serial.print((char)inChar);
+                        }
+                        vTaskDelay(1);
+                    } while (outChar != 0x1A && inChar != 0x1A); // break upon 'SUB' (ctrl-z)
+                }
+                break;
+
             case 'q':
                 [[fallthrough]];
             case 'Q':
@@ -278,6 +349,10 @@ void swiMuxMenu(TankManager& tankManager)
         }
     }
 }
+#else
+void swiMuxMenu(TankManager& tankManager) {}
+#endif
+
 
 void runCalibrationSequence(HX711Scale& scale)
 {
@@ -380,7 +455,7 @@ void scaleTestMenu(HX711Scale& scale)
                 Serial.println("Save complete.");
                 break;
             case 'q':
-            [[fallthrough]]
+                [[fallthrough]];
             case 'Q':
                 testing = false;
                 break;
@@ -393,6 +468,7 @@ void scaleTestMenu(HX711Scale& scale)
 
 
 // --- Main Test Function ---
+#define WAITFORUARTDEBUG_PROMPT_STRING "Waiting for debug, press [ENTER] to proceed, any other key to skip."
 
 void doDebugTest(ServoController& servoController, TankManager& tankManager, HX711Scale& scale)
 {
@@ -400,16 +476,32 @@ void doDebugTest(ServoController& servoController, TankManager& tankManager, HX7
     Serial.println("Press any key to enter the test menu...");
     Serial.flush();
 
-    int timeout = 100; // 10 seconds
-    while (!Serial.available() && timeout > 0) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-        timeout--;
-    }
+    const char* promptStr = WAITFORUARTDEBUG_PROMPT_STRING;
+    const uint32_t PERIOD = sizeof(WAITFORUARTDEBUG_PROMPT_STRING) - 1;
 
-    if (!Serial.available()) {
-        Serial.println("No input detected, resuming normal operation.");
-        return;
-    }
+    // Purge input buffer
+    flushSerialInputBuffer();
+    uint32_t lastUpdTick = 0, idx = 0;
+    int entry;
+    do {
+        entry = Serial.read();
+        if ((millis() - lastUpdTick) > 33) {
+            lastUpdTick = millis();
+            if (idx < PERIOD) {
+                Serial.print(promptStr[idx]);
+            } else if (idx < PERIOD * 2) {
+                vTaskDelay(1); // do nothing, keep the string printed for a full tick
+            } else if (idx < PERIOD * 3) {
+                printf("\b \b"); // backspace (rewind) before the char, print a space over it, then backspace (rewind) before the space itself.
+            } else {
+                idx = 0;
+                continue;
+            }
+            idx++;
+        }
+    } while (entry < 0);
+
+
 
     flushSerialInputBuffer();
 

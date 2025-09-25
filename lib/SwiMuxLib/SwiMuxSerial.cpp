@@ -40,25 +40,73 @@ static uint64_t u64fromBytes(uint8_t* bytes, size_t len)
 
 void SwiMuxSerial_t::begin()
 {
-    _sPort.begin(57600, SerialConfig::SERIAL_8N1, _rxPin, _txPin, false, 1000UL, 140);
+    if (!_beginCalled) {
+        _sPort.begin(57600, SerialConfig::SERIAL_8N1, _rxPin, _txPin);
+        ESP_LOGI(TAG, "Serial port initialized.");
+    }
 }
 
 bool SwiMuxSerial_t::sleep()
 {
     _codec.encode(SwiMuxRequest_Sleep, sizeof(SwiMuxRequest_Sleep), [this](uint8_t value) { this->_sPort.write(((uint8_t)value)); });
+    _isAwake = false;
     return _codec.waitForAckTo(
       SwiMuxOpcodes_e::SMCMD_Sleep, millis, [this]() -> int { return this->_sPort.read(); }, [](unsigned long ms) { vTaskDelay(pdMS_TO_TICKS(ms)); });
 }
 
-
-bool SwiMuxSerial_t::isAwake()
+bool SwiMuxSerial_t::hasEvents(SwiMuxPresenceReport_t* reportOut)
 {
-
-    _codec.encode(SwiMuxRequest_IsAwake, sizeof(SwiMuxRequest_IsAwake), [this](uint8_t value) { this->_sPort.write(((uint8_t)value)); });
-    return _codec.waitForAckTo(
-      SwiMuxOpcodes_e::SMCMD_IsAwake, millis, [this]() -> int { return this->_sPort.read(); },
-      [](unsigned long ms) { vTaskDelay(pdMS_TO_TICKS(ms)); });
+    SwiMuxPresenceReport_t report;
+    report = _pollPresencePacket();
+    if (report.busesCount > 0) {
+        if (reportOut != NULL)
+            *reportOut = report;
+        return true;
+    }
+    return false;
 }
+
+SwiMuxPresenceReport_t SwiMuxSerial_t::getPresence(uint32_t timeout_ms)
+{
+    while (_sPort.available()) {
+        _sPort.read();
+    }
+
+    _codec.encode(SwiMuxRequest_GetPresence, sizeof(SwiMuxRequest_GetPresence), [this](uint8_t value) { this->_sPort.write(((uint8_t)value)); });
+    vTaskDelay(pdMS_TO_TICKS(PRESENCE_DELAY_MS));
+    SwiMuxPresenceReport_t res = _pollPresencePacket(timeout_ms);
+    if (res.busesCount > 0)
+        _isAwake = true;
+    return res;
+}
+
+SwiMuxPresenceReport_t SwiMuxSerial_t::_pollPresencePacket(uint32_t timeout_ms)
+{
+    uint8_t* payload              = nullptr;
+    size_t pLen                   = 0;
+    uint32_t startTime            = millis();
+    SwiMuxPresenceReport_t result = { 0, 0 };
+    do {
+        if (_sPort.available()) {
+            int charVal = _sPort.read();
+            if (charVal > -1) {
+                _codec.decode((uint8_t)charVal, payload, pLen);
+            }
+            if (pLen == sizeof(SwiMuxCmdPresence_t) && payload != nullptr && (payload[0] ^ payload[1]) == 0) {
+                SwiMuxCmdPresence_t resp;
+                memcpy(&resp, payload, sizeof(SwiMuxCmdPresence_t));
+                result.busesCount = resp.busesCount;
+                result.presences  = (((uint16_t)resp.presenceMSB) << 8) | resp.presenceLSB;
+                return result;
+            }
+        }
+        vTaskDelay(1); // with a tick of 1ms (as default on ESP32), we should get 5.76 characters per wait cycle @ 57600bds.
+    } while ((millis() - startTime) <= timeout_ms);
+    if (result.busesCount > 0)
+        _isAwake = true;
+    return result;
+}
+
 
 SwiMuxResult_e SwiMuxSerial_t::getUid(uint8_t busIndex, uint64_t& uid, uint32_t timeout_ms)
 {
@@ -74,11 +122,12 @@ SwiMuxResult_e SwiMuxSerial_t::getUid(uint8_t busIndex, uint64_t& uid, uint32_t 
             if (charVal > -1)
                 _codec.decode((uint8_t)charVal, payload, pLen);
             if (pLen > 0 && payload != nullptr) {
-                uid = u64fromBytes(payload, pLen);
+                uid      = u64fromBytes(payload, pLen);
+                _isAwake = true;
                 return SwiMuxResult_e::SMREZ_OK;
             }
         }
-        vTaskDelay(1);
+        vTaskDelay(1); // with a tick of 1ms (as default on ESP32), we should get 5.76 characters per wait cycle @ 57600bds.
     } while ((millis() - startTime) <= timeout_ms);
     return SMREZ_TIMED_OUT;
 }
@@ -100,6 +149,7 @@ SwiMuxResult_e SwiMuxSerial_t::rollCall(RollCallArray_t& uidsList, uint32_t time
             int charVal = _sPort.read();
             if (charVal > -1) {
                 if (false == _codec.decode((uint8_t)charVal, payload, pLen)) {
+                    _isAwake = true;
                     return SMREZ_FRAME_ERROR;
                 }
                 if (pLen == sizeof(SwiMuxRollCallResult_t) && payload != nullptr) {
@@ -110,6 +160,7 @@ SwiMuxResult_e SwiMuxSerial_t::rollCall(RollCallArray_t& uidsList, uint32_t time
                         memcpy((void*)&uidsList.bus[3], &payload[2 + 3 * 8], 8);
                         memcpy((void*)&uidsList.bus[4], &payload[2 + 4 * 8], 8);
                         memcpy((void*)&uidsList.bus[5], &payload[2 + 5 * 8], 8);
+                        _isAwake = true;
                         return SMREZ_OK;
                     } else { // We got a paylod, but not the expected one.
                         return SMREZ_INVALID_PAYLOAD;
@@ -117,6 +168,7 @@ SwiMuxResult_e SwiMuxSerial_t::rollCall(RollCallArray_t& uidsList, uint32_t time
                 }
             }
         }
+        vTaskDelay(1); // with a tick of 1ms (as default on ESP32), we should get 5.76 characters per wait cycle @ 57600bds.
     } while ((millis() - startTime) <= timeout_ms);
     return SMREZ_TIMED_OUT;
 }
@@ -147,14 +199,16 @@ SwiMuxResult_e SwiMuxSerial_t::read(uint8_t busIndex, uint8_t*& bufferOut, uint8
                   || payload[3] != cmd.offset) {
                     // Payload has some unexpected header.
                     ESP_LOGE(TAG, "Unexpected values in read response header.");
+                    _isAwake = true;
                     return SMREZ_READ_RESP_ERROR;
                 } else { // payload seems legit
                     memcpy(bufferOut, &payload[sizeof(SwiMuxCmdRead_t)], payload[4]);
+                    _isAwake = true;
                     return SMREZ_OK;
                 }
             }
         }
-        vTaskDelay(1);
+        vTaskDelay(1); // with a tick of 1ms (as default on ESP32), we should get 5.76 characters per wait cycle @ 57600bds.
     } while ((millis() - startTime) <= timeout_ms);
     return SMREZ_TIMED_OUT;
 }
@@ -183,7 +237,8 @@ SwiMuxResult_e SwiMuxSerial_t::write(uint8_t busIndex, uint8_t*& bufferIn, uint8
     if (_codec.encode((const uint8_t*)(void*)pCmd, sizeof(SwiMuxCmdWrite_t) + (size_t)len, [this](uint8_t wrtVal) { this->_sPort.write(wrtVal); })) {
         if (_codec.waitForAckTo(
               SMCMD_WriteBytes, millis, [this]() -> int { return this->_sPort.read(); }, [](unsigned long wms) { vTaskDelay(pdMS_TO_TICKS(wms)); })) {
-            result = SMREZ_OK;
+            _isAwake = true;
+            result   = SMREZ_OK;
         } else {
             result = SMREZ_TIMED_OUT;
         }
