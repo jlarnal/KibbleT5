@@ -9,7 +9,6 @@
 #include "TimeKeeping.hpp"
 #include "board_pinout.h"
 #include "TankManager.hpp"
-#include "ServoController.hpp"
 #include "HX711Scale.hpp"
 #include "RecipeProcessor.hpp"
 #include "EPaperDisplay.hpp"
@@ -22,12 +21,11 @@
 // --- Global Objects ---
 ConfigManager configManager("KibbleT5");
 TimeKeeping timeKeeping(globalDeviceState, xDeviceStateMutex, configManager);
-ServoController servoController;
-TankManager tankManager(globalDeviceState, xDeviceStateMutex, &servoController);
+TankManager tankManager(globalDeviceState, xDeviceStateMutex);
 HX711Scale scale(globalDeviceState, xDeviceStateMutex, configManager);
-RecipeProcessor recipeProcessor(globalDeviceState, xDeviceStateMutex, configManager, tankManager, servoController, scale);
+RecipeProcessor recipeProcessor(globalDeviceState, xDeviceStateMutex, configManager, tankManager, scale);
 EPaperDisplay display(globalDeviceState, xDeviceStateMutex);
-SafetySystem safetySystem(globalDeviceState, xDeviceStateMutex, servoController);
+SafetySystem safetySystem(globalDeviceState, xDeviceStateMutex, tankManager);
 WebServer webServer(globalDeviceState, xDeviceStateMutex, configManager, recipeProcessor, tankManager, display);
 Battery battMon(3000, 4200, BATT_HALFV_PIN);
 
@@ -77,12 +75,11 @@ void setup()
     // Initialize hardware before running tests
     uint16_t hopper_closed, hopper_open;
     configManager.loadHopperCalibration(hopper_closed, hopper_open);
-    servoController.begin(hopper_closed, hopper_open);
-    tankManager.begin();
+    tankManager.begin(hopper_closed, hopper_open);
     scale.begin(HX711_DATA_PIN, HX711_CLOCK_PIN);
 
     // --- RUN DIAGNOSTIC AND TEST CLI ---
-    doDebugTest(servoController, tankManager, scale);
+    doDebugTest(tankManager, scale);
 
 
     bool wifiConnected = webServer.manageWiFiConnection();

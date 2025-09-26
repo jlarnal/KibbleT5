@@ -3,8 +3,8 @@
 
 static const char* TAG = "SafetySystem";
 
-SafetySystem::SafetySystem(DeviceState& deviceState, SemaphoreHandle_t& mutex, ServoController& servoController)
-    : _deviceState(deviceState), _mutex(mutex), _servoController(servoController) {}
+SafetySystem::SafetySystem(DeviceState& deviceState, SemaphoreHandle_t& mutex, TankManager& tankManager)
+    : _deviceState(deviceState), _mutex(mutex), _tankManager(tankManager) {}
 
 void SafetySystem::startTask() {
     xTaskCreate(
@@ -55,7 +55,7 @@ void SafetySystem::_safetyTask(void *pvParameters) {
                 } else {
                     if ((xTaskGetTickCount() - stallCheckStartTime) > pdMS_TO_TICKS(STALL_TIMEOUT_MS)) {
                         ESP_LOGE(TAG, "SAFETY ALERT: Motor stall detected! No weight change in %d ms. Stopping all servos.", STALL_TIMEOUT_MS);
-                        instance->_servoController.stopAllServos();
+                        instance->_tankManager.stopAllServos();
                         if (xSemaphoreTake(instance->_mutex, portMAX_DELAY) == pdTRUE) {
                             instance->_deviceState.safetyModeEngaged = true;
                             instance->_deviceState.lastError = "SAFETY: Motor stall!";
@@ -72,7 +72,7 @@ void SafetySystem::_safetyTask(void *pvParameters) {
 
         if (currentWeight > 500.0) {
             ESP_LOGE(TAG, "SAFETY ALERT: Bowl overfill detected! Weight: %.2fg. Stopping all servos.", currentWeight);
-            instance->_servoController.stopAllServos();
+            instance->_tankManager.stopAllServos();
             if (xSemaphoreTake(instance->_mutex, portMAX_DELAY) == pdTRUE) {
                 instance->_deviceState.safetyModeEngaged = true;
                 instance->_deviceState.lastError = "SAFETY: Bowl overfill!";

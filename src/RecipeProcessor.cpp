@@ -5,12 +5,11 @@
 static const char* TAG = "RecipeProcessor";
 
 RecipeProcessor::RecipeProcessor(DeviceState& deviceState, SemaphoreHandle_t& mutex, ConfigManager& configManager, TankManager& tankManager,
-  ServoController& servoController, HX711Scale& scale)
+  HX711Scale& scale)
     : _deviceState(deviceState),
       _mutex(mutex),
       _configManager(configManager),
       _tankManager(tankManager),
-      _servoController(servoController),
       _scale(scale)
 {}
 
@@ -36,7 +35,7 @@ bool RecipeProcessor::executeImmediateFeed(const uint64_t tankUid, float targetW
         return false;
     }
 
-    ESP_LOGI(TAG, "Starting immediate feed of %.2fg from tank 0x%016x", targetWeight, tankUid);
+    ESP_LOGI(TAG, "Starting immediate feed of %.2fg from tank 0x%016llx", targetWeight, tankUid);
     bool success = _dispenseIngredient(tankUid, targetWeight);
 
     // Log the immediate feeding event
@@ -96,9 +95,9 @@ bool RecipeProcessor::executeRecipeFeed(int recipeId, int servings)
         // Calculate the amount to dispense for this ingredient based on its percentage
         float amountToDispense = singleServingWeight * (ingredient.percentage / 100.0f) * servings;
 
-        ESP_LOGI(TAG, "Dispensing %.2fg from tank 0x%016x", amountToDispense, ingredient.tankUid);
+        ESP_LOGI(TAG, "Dispensing %.2fg from tank 0x%016llx", amountToDispense, ingredient.tankUid);
         if (!_dispenseIngredient(ingredient.tankUid, amountToDispense)) {
-            ESP_LOGE(TAG, "Failed to dispense ingredient from tank 0x%016x. Aborting recipe.", ingredient.tankUid);
+            ESP_LOGE(TAG, "Failed to dispense ingredient from tank 0x%016llx. Aborting recipe.", ingredient.tankUid);
             stopAllFeeding();
             overallSuccess = false;
             break;
@@ -127,7 +126,7 @@ bool RecipeProcessor::_dispenseIngredient(const uint64_t tankUid, float targetWe
 {
     int8_t servoId = _tankManager.getBusOfTank(tankUid); // servoId and tank ordinal (bus index) are the same thing.
     if (servoId < 0) {
-        ESP_LOGE(TAG, "Dispense failed: tank #0x%016x", tankUid);
+        ESP_LOGE(TAG, "Dispense failed: tank #0x%016llx not found or TankManager is in servo mode.", tankUid);
         if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
             _deviceState.lastError = "Tank not found.";
             xSemaphoreGive(_mutex);
@@ -138,9 +137,9 @@ bool RecipeProcessor::_dispenseIngredient(const uint64_t tankUid, float targetWe
     float initialWeight   = _scale.getWeight();
     float dispensedWeight = 0;
 
-    _servoController.setServoPower(true);
-    vTaskDelay(pdMS_TO_TICKS(100));
-    _servoController.setContinuousServo(servoId, 1.0f);
+    _tankManager.setServoPower(true);
+    vTaskDelay(pdMS_TO_TICKS(200)); // Wait for servo power supply to stabilize
+    _tankManager.setContinuousServo(servoId, 1.0f);
 
     const TickType_t timeout = pdMS_TO_TICKS(30000);
     TickType_t startTime     = xTaskGetTickCount();
@@ -149,7 +148,7 @@ bool RecipeProcessor::_dispenseIngredient(const uint64_t tankUid, float targetWe
         dispensedWeight = _scale.getWeight() - initialWeight;
 
         if (xTaskGetTickCount() - startTime > timeout) {
-            ESP_LOGE(TAG, "Dispense timed out for tank 0x%016x.", tankUid);
+            ESP_LOGE(TAG, "Dispense timed out for tank 0x%016llx.", tankUid);
             if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
                 _deviceState.lastError = "Dispense operation timed out.";
                 xSemaphoreGive(_mutex);
@@ -170,25 +169,24 @@ bool RecipeProcessor::_dispenseIngredient(const uint64_t tankUid, float targetWe
         }
 
         if (targetWeight - dispensedWeight < 5.0) {
-            _servoController.setContinuousServo(servoId, 0.2f);
+            _tankManager.setContinuousServo(servoId, 0.2f);
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 
-    _servoController.setContinuousServo(servoId, 0.0f);
+    _tankManager.setContinuousServo(servoId, 0.0f);
     vTaskDelay(pdMS_TO_TICKS(500));
-    _servoController.setServoPower(false);
+    _tankManager.setServoPower(false);
 
-    ESP_LOGI(TAG, "Dispensed %.2fg (target %.2fg) from tank 0x%016x", dispensedWeight, targetWeight, tankUid);
+    ESP_LOGI(TAG, "Dispensed %.2fg (target %.2fg) from tank 0x%016llx", dispensedWeight, targetWeight, tankUid);
     return true;
 }
 
 void RecipeProcessor::stopAllFeeding()
 {
     ESP_LOGW(TAG, "Stopping all servos.");
-    _servoController.stopAllServos();
-    _servoController.setServoPower(false);
+    _tankManager.stopAllServos();
 }
 
 void RecipeProcessor::_loadRecipesFromNVS()

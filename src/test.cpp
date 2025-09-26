@@ -105,57 +105,7 @@ template <typename T> static String toBinaryString(const T& value)
 
 // --- Test Sub-menus ---
 
-void lowLevelServoMenu(ServoController& servoController)
-{
-    bool testing = true;
-    while (testing) {
-        Serial.println("\n--- Low-Level Servo Test ---");
-        Serial.println("1. Set Raw PWM Ticks (0-4095)");
-        Serial.println("q. Back to Servo Menu");
-        Serial.print("Enter choice: ");
-
-        flushSerialInputBuffer();
-        while (!Serial.available()) {
-            vTaskDelay(pdMS_TO_TICKS(50));
-        }
-        char choice = Serial.read();
-        Serial.print(choice);
-        Serial.println();
-
-        switch (choice) {
-            case '1':
-                {
-                    Serial.print("Enter Servo Channel (0-15): ");
-                    int servoNum = readSerialInt();
-                    if (servoNum < 0 || servoNum > 15) {
-                        Serial.println("Invalid channel.");
-                        break;
-                    }
-                    Serial.print("Enter Raw Ticks (0-4095): ");
-                    int ticks = readSerialInt();
-                    if (ticks < 0 || ticks > 4095) {
-                        Serial.println("Invalid tick value.");
-                        break;
-                    }
-                    // This requires a new public method in ServoController like:
-                    // void setServoTicks(uint8_t servoNum, uint16_t ticks) { _pwm.setPWM(servoNum, 0, ticks); }
-                    // servoController.setServoTicks(servoNum, ticks);
-                    Serial.printf("Set servo %d to %d raw ticks. (Requires ServoController modification)\n", servoNum, ticks);
-                    break;
-                }
-            case 'q':
-                [[fallthrough]];
-            case 'Q':
-                testing = false;
-                break;
-            default:
-                Serial.println("Invalid choice.");
-                break;
-        }
-    }
-}
-
-void servoTestMenu(ServoController& servoController)
+void servoTestMenu(TankManager& tankManager)
 {
     bool testing = true;
     while (testing) {
@@ -165,7 +115,6 @@ void servoTestMenu(ServoController& servoController)
         Serial.println("3. Set Single Servo PWM (μs)");
         Serial.println("4. Set All 8 Servos PWM (μs)");
         Serial.println("5. Set Continuous Servo Speed (-1.0 to 1.0)");
-        Serial.println("6. Low-Level Mode (Raw Ticks)");
         Serial.println("q. Back to Main Menu");
         Serial.print("Enter choice: ");
 
@@ -180,11 +129,11 @@ void servoTestMenu(ServoController& servoController)
         switch (choice) {
             case '1':
                 Serial.println("Powering servos ON.");
-                servoController.setServoPower(true);
+                tankManager.setServoPower(true);
                 break;
             case '2':
                 Serial.println("Powering servos OFF.");
-                servoController.setServoPower(false);
+                tankManager.setServoPower(false);
                 break;
             case '3':
                 {
@@ -196,7 +145,7 @@ void servoTestMenu(ServoController& servoController)
                     }
                     Serial.print("Enter PWM value (e.g., 1000-2000): ");
                     int pwm = readSerialInt();
-                    servoController.setServoPWM(servoNum, pwm);
+                    tankManager.setServoPWM(servoNum, pwm);
                     Serial.printf("Set servo %d to %d μs.\n", servoNum, pwm);
                     break;
                 }
@@ -205,7 +154,7 @@ void servoTestMenu(ServoController& servoController)
                     Serial.print("Enter PWM value for all 8 servos: ");
                     int pwm = readSerialInt();
                     for (int i = 0; i < 8; i++) {
-                        servoController.setServoPWM(i, pwm);
+                        tankManager.setServoPWM(i, pwm);
                     }
                     Serial.printf("Set servos 0-7 to %d μs.\n", pwm);
                     break;
@@ -220,13 +169,10 @@ void servoTestMenu(ServoController& servoController)
                     }
                     Serial.print("Enter speed (-1.0 to 1.0): ");
                     float speed = readSerialFloat();
-                    servoController.setContinuousServo(servoNum, speed);
+                    tankManager.setContinuousServo(servoNum, speed);
                     Serial.printf("Set continuous servo %d to speed %.2f.\n", servoNum, speed);
                     break;
                 }
-            case '6':
-                lowLevelServoMenu(servoController);
-                break;
             case 'q':
                 [[fallthrough]];
             case 'Q':
@@ -470,7 +416,7 @@ void scaleTestMenu(HX711Scale& scale)
 // --- Main Test Function ---
 #define WAITFORUARTDEBUG_PROMPT_STRING "Waiting for debug, press [ENTER] to proceed, any other key to skip."
 
-void doDebugTest(ServoController& servoController, TankManager& tankManager, HX711Scale& scale)
+void doDebugTest(TankManager& tankManager, HX711Scale& scale)
 {
     Serial.println("\n\n--- KIBBLET5 HARDWARE DEBUG MODE ---");
     Serial.println("Press any key to enter the test menu...");
@@ -524,7 +470,7 @@ void doDebugTest(ServoController& servoController, TankManager& tankManager, HX7
 
         switch (choice) {
             case '1':
-                servoTestMenu(servoController);
+                servoTestMenu(tankManager);
                 break;
             case '2':
                 swiMuxMenu(tankManager);

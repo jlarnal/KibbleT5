@@ -3,7 +3,7 @@
 
 #include <string>
 #include <vector>
-#include "ServoController.hpp"
+#include <Adafruit_PWMServoDriver.h>
 #include "freertos/semphr.h"
 #include "board_pinout.h"
 #include <SwiMuxSerial.h>
@@ -11,8 +11,15 @@
 // Forward-declare DeviceState to break circular dependency.
 struct DeviceState;
 
+// Constants for continuous rotation servos
+#define SERVO_CONTINUOUS_STOP_PWM 1500
+#define SERVO_CONTINUOUS_FWD_PWM  2000
+#define SERVO_CONTINUOUS_REV_PWM  1000
 
-class TankManager;
+// Default values for the hopper servo if no calibration is found
+#define DEFAULT_HOPPER_CLOSED_PWM 1000
+#define DEFAULT_HOPPER_OPEN_PWM   2000
+
 
 /** @brief Data structure for the tank's EEPROM, and UID. */
 struct __attribute__((packed)) TankEEpromData_t {
@@ -100,14 +107,14 @@ class TankManager {
 
   public:
     // Constructor now takes ServoController directly.
-    TankManager(DeviceState& deviceState, SemaphoreHandle_t& mutex, ServoController* servoController)
-        : _deviceState(deviceState), _servoController(servoController), _swiMux(SWIMUX_SERIAL_DEVICE, SWIMUX_TX_PIN, SWIMUX_RX_PIN), _lastPresenceReport { 0, 0 }
+    TankManager(DeviceState& deviceState, SemaphoreHandle_t& mutex)
+        : _deviceState(deviceState), _deviceStateMutex(mutex), _pwm(Adafruit_PWMServoDriver()), _isServoMode(false), _swiMux(SWIMUX_SERIAL_DEVICE, SWIMUX_TX_PIN, SWIMUX_RX_PIN), _lastPresenceReport { 0, 0 }
     {
 
     }
 
     /** @brief Initialize the multiplexed OneWire setup but does not start the task. */
-    void begin();
+    void begin(uint16_t hopper_closed_pwm, uint16_t hopper_open_pwm);
     /** @brief Refreshes the local data about connected tanks, by interrogating them. Uses lazy update.
      * @param refreshMap <optional> bit map of the tanks to refresh.
      */
@@ -148,6 +155,13 @@ class TankManager {
      */
     inline bool disableSwiMux() { return _swiMux.sleep(); }
 
+    // --- Servo Control Methods ---
+    void setServoPWM(uint8_t servoNum, uint16_t pwm);
+    void setServoPower(bool on);
+    void setContinuousServo(uint8_t servoNum, float speed); // speed from -1.0 to 1.0
+    void stopAllServos();
+    void openHopper();
+    void closeHopper();
 
 
 #ifdef SWIMUX_DEBUG_ENABLED
@@ -161,9 +175,13 @@ class TankManager {
     static constexpr uint32_t SWIMUX_POWERUP_DELAY_MS     = 100;
     static constexpr TickType_t MUTEX_ACQUISITION_TIMEOUT = pdMS_TO_TICKS(2000);
 
-
     DeviceState& _deviceState;
-    ServoController* _servoController;
+    SemaphoreHandle_t &_deviceStateMutex;
+    Adafruit_PWMServoDriver _pwm;
+    uint16_t _hopperOpenPwm;
+    uint16_t _hopperClosedPwm;
+    bool _isServoMode;
+
     static TaskHandle_t _runningTask;
 
     // A physical interface that let us address SWI memories (AT21CS01, 128 bytes) on 6 separate SWI buses. through a 57600B8N1 uart connection.
@@ -175,6 +193,10 @@ class TankManager {
 
     // Internal list of tanks, which holds the comprehensive state.
     std::vector<TankInfo> _knownTanks;
+
+    // --- PCA9685 Mode Switching Helpers ---
+    void _switchToSwiMode();
+    void _switchToServoMode();
 
     // --- Fixed-point conversion helpers ---
     static inline double q3_13_to_double(uint16_t q_val) { return (double)q_val / 8192.0; }

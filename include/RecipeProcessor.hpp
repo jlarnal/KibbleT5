@@ -4,7 +4,6 @@
 #include "DeviceState.hpp"
 #include "ConfigManager.hpp"
 #include "TankManager.hpp"
-#include "ServoController.hpp"
 #include "HX711Scale.hpp"
 
 /**
@@ -15,7 +14,7 @@
 class RecipeProcessor {
   public:
     RecipeProcessor(DeviceState& deviceState, SemaphoreHandle_t& mutex, ConfigManager& configManager, TankManager& tankManager,
-      ServoController& servoController, HX711Scale& scale);
+      HX711Scale& scale);
 
     void begin();
 
@@ -40,7 +39,6 @@ class RecipeProcessor {
     SemaphoreHandle_t& _mutex;
     ConfigManager& _configManager;
     TankManager& _tankManager;
-    ServoController& _servoController;
     HX711Scale& _scale;
 
     std::vector<Recipe> _recipes;

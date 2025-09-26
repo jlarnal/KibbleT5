@@ -2,7 +2,7 @@
 #define SAFETYSYSTEM_HPP
 
 #include "DeviceState.hpp"
-#include "ServoController.hpp"
+#include "TankManager.hpp"
 
 /**
  * @file SafetySystem.hpp
@@ -11,13 +11,13 @@
 
 class SafetySystem {
 public:
-    SafetySystem(DeviceState& deviceState, SemaphoreHandle_t& mutex, ServoController& servoController);
+    SafetySystem(DeviceState& deviceState, SemaphoreHandle_t& mutex, TankManager& tankManager);
     void startTask();
 
 private:
     DeviceState& _deviceState;
     SemaphoreHandle_t& _mutex;
-    ServoController& _servoController;
+    TankManager& _tankManager;
 
     static void _safetyTask(void *pvParameters);
 };

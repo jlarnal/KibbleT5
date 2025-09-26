@@ -1,6 +1,6 @@
 #include "TankManager.hpp"
 #include "DeviceState.hpp"
-#include "board_pinout.h" // For ONEWIRE_MUX pins
+#include "board_pinout.h" 
 #include "esp_log.h"
 #include <algorithm>
 #include <cstring>
@@ -88,16 +88,43 @@ bool TankEEpromData_t::sanitize(TankEEpromData_t& eedata)
 }
 
 
-void TankManager::begin()
+void TankManager::begin(uint16_t hopper_closed_pwm, uint16_t hopper_open_pwm)
 {
+    _hopperClosedPwm = hopper_closed_pwm;
+    _hopperOpenPwm = hopper_open_pwm;
+    _isServoMode = false;
+
     _swimuxMutex = xSemaphoreCreateRecursiveMutex();
+
+    // Init PCA9685
+    _pwm.begin();
 
     // Configure pins and their respective default levels.
     _swiMux.begin();
+    
+    pinMode(SERVO_POWER_ENABLE_PIN, OUTPUT);
+    digitalWrite(SERVO_POWER_ENABLE_PIN, HIGH); // Start with power off (HIGH for active-low)
+    
+    _switchToSwiMode(); // Set PCA9685 to SWI mode by default
+    
     ESP_LOGI(TAG, "Initializing Tank Manager with SwiMux interface...");
     refresh();
 }
 
+void TankManager::_switchToSwiMode() {
+    _pwm.setPWMFreq(100); // Low frequency for DC power
+    for (int i = 0; i < 16; i++) {
+        _pwm.setPWM(i, 4095, 0); // 100% duty cycle to power SWI pull-ups
+    }
+    _isServoMode = false;
+    ESP_LOGI(TAG, "PCA9685 switched to SWI power mode.");
+}
+
+void TankManager::_switchToServoMode() {
+    _pwm.setPWMFreq(50); // Standard servo frequency
+    _isServoMode = true;
+    ESP_LOGI(TAG, "PCA9685 switched to Servo PWM mode.");
+}
 
 void TankManager::_tankDetectionTask(void* pvParam)
 {
@@ -106,7 +133,7 @@ void TankManager::_tankDetectionTask(void* pvParam)
     TankManager* pInst = (TankManager*)pvParam;
     SwiMuxPresenceReport_t currReport;
     while (1) {
-        if (pInst->_swiMux.isAsleep()) {
+        if (pInst->_swiMux.isAsleep() && !pInst->_isServoMode) {
             currReport = pInst->_lastPresenceReport;
             if (xSemaphoreTakeRecursive(pInst->_swimuxMutex, MUTEX_ACQUISITION_TIMEOUT) == pdTRUE) {
                 if (pInst->_swiMux.hasEvents(&currReport)) {
@@ -124,6 +151,11 @@ void TankManager::_tankDetectionTask(void* pvParam)
 
 void TankManager::presenceRefresh()
 {
+    if(_isServoMode) {
+        ESP_LOGW(TAG, "Cannot refresh tank presence while in servo mode.");
+        return;
+    }
+
     RollCallArray_t presences;
     bool alreadyKnown[6] = { false, false, false, false, false, false };
 
@@ -252,6 +284,7 @@ TankInfo::TankInfoDiscrepancies_e TankInfo::toTankData(TankEEpromData_t& eeprom)
 
 void TankManager::fullRefresh()
 {
+    if(_isServoMode) return;
     if (xSemaphoreTakeRecursive(_swimuxMutex, MUTEX_ACQUISITION_TIMEOUT) == pdTRUE) {
         presenceRefresh();
         TankEEpromData_t data;
@@ -276,6 +309,7 @@ void TankManager::fullRefresh()
 
 bool TankManager::updateEeprom(TankEEpromData_t& data, TankInfo::TankInfoDiscrepancies_e updatesNeeded, int8_t forcedBusIndex)
 {
+    if(_isServoMode) return false;
     // Determine the bus index to use. If forcedBusIndex is provided (>=0), use it.
     // Otherwise, use the last known bus index from the data structure.
     uint8_t busIndex = (forcedBusIndex >= 0) ? forcedBusIndex : data.records[0].history.lastBusIndex;
@@ -310,6 +344,7 @@ bool TankManager::updateEeprom(TankEEpromData_t& data, TankInfo::TankInfoDiscrep
 
 int8_t TankManager::getBusOfTank(const uint64_t tankUid)
 {
+    if(_isServoMode) return -1;
     if (xSemaphoreTakeRecursive(_swimuxMutex, MUTEX_ACQUISITION_TIMEOUT) != pdTRUE) {
         ESP_LOGE(TAG, "Failed to acquire SwiMux mutex for getBusOfTank!");
         return -1;
@@ -330,6 +365,7 @@ int8_t TankManager::getBusOfTank(const uint64_t tankUid)
 // Handles updating the tank's configuration in its EEPROM.
 bool TankManager::commitTankInfo(const TankInfo& tankInfo)
 {
+    if(_isServoMode) return false;
     if (xSemaphoreTakeRecursive(_swimuxMutex, MUTEX_ACQUISITION_TIMEOUT) != pdTRUE) {
         ESP_LOGE(TAG, "Failed to acquire SwiMux mutex for commitTankInfo!");
         return false;
@@ -372,6 +408,7 @@ bool TankManager::commitTankInfo(const TankInfo& tankInfo)
 
 bool TankManager::refreshTankInfo(TankInfo& tankInfo)
 {
+    if(_isServoMode) return false;
     // 1. The UID must be provided in the tankInfo struct.
     if (tankInfo.uid == 0) {
         ESP_LOGE(TAG, "refreshTankInfo: UID must be provided.");
@@ -412,6 +449,7 @@ bool TankManager::refreshTankInfo(TankInfo& tankInfo)
 
 bool TankManager::updateRemaingKibble(const uint64_t uid, uint16_t newRemainingGrams)
 {
+    if(_isServoMode) return false;
     if (xSemaphoreTakeRecursive(_swimuxMutex, MUTEX_ACQUISITION_TIMEOUT) != pdTRUE) {
         ESP_LOGE(TAG, "Failed to acquire SwiMux mutex for updateRemaingKibble!");
         return false;
@@ -484,6 +522,66 @@ bool TankManager::updateRemaingKibble(const uint64_t uid, uint16_t newRemainingG
     return false;
 }
 
+// --- Servo Control Implementation ---
+void TankManager::setServoPower(bool on) {
+    if(on && !_isServoMode) {
+        _switchToServoMode();
+    }
+    
+    digitalWrite(SERVO_POWER_ENABLE_PIN, on ? LOW : HIGH);
+    ESP_LOGI(TAG, "Servo power %s", on ? "ON" : "OFF");
+
+    if(!on && _isServoMode) {
+        _switchToSwiMode();
+    }
+}
+
+void TankManager::setServoPWM(uint8_t servoNum, uint16_t pwm) {
+    if (servoNum >= 16) return;
+    if (!_isServoMode) _switchToServoMode();
+    
+    uint16_t ticks = map(pwm, 0, 20000, 0, 4095);
+    _pwm.setPWM(servoNum, 0, ticks);
+}
+
+void TankManager::setContinuousServo(uint8_t servoNum, float speed) {
+    if (!_isServoMode) {
+        ESP_LOGW(TAG, "Attempted to set servo speed while not in servo mode. Switching modes.");
+        _switchToServoMode();
+    }
+
+    if (speed > 1.0) speed = 1.0;
+    if (speed < -1.0) speed = -1.0;
+
+    if (abs(speed) < 0.01) {
+        setServoPWM(servoNum, SERVO_CONTINUOUS_STOP_PWM);
+    } else if (speed > 0) {
+        uint16_t pwm = map(speed * 100, 0, 100, SERVO_CONTINUOUS_STOP_PWM, SERVO_CONTINUOUS_FWD_PWM);
+        setServoPWM(servoNum, pwm);
+    } else {
+        uint16_t pwm = map(speed * 100, -100, 0, SERVO_CONTINUOUS_REV_PWM, SERVO_CONTINUOUS_STOP_PWM);
+        setServoPWM(servoNum, pwm);
+    }
+}
+
+void TankManager::stopAllServos() {
+    if (!_isServoMode) {
+       _switchToServoMode(); // Ensure we can send stop commands
+    }
+    for (uint8_t i = 0; i < 16; i++) {
+        setContinuousServo(i, 0.0);
+    }
+    setServoPower(false); // This will also switch back to SWI mode
+    ESP_LOGW(TAG, "All servos stopped and powered off.");
+}
+
+void TankManager::openHopper() {
+    setServoPWM(0, _hopperOpenPwm);
+}
+
+void TankManager::closeHopper() {
+    setServoPWM(0, _hopperClosedPwm);
+}
 
 
 #pragma region Test methods for debug, to be commented out upon release
