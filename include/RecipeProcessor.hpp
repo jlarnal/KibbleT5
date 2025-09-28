@@ -6,6 +6,7 @@
 #include "TankManager.hpp"
 #include "HX711Scale.hpp"
 
+#define DISPENSING_LOOP_PERIOD_MS (250)
 /**
  * @file RecipeProcessor.hpp
  * @brief Handles the logic for dispensing kibble for recipes or immediate feeds.

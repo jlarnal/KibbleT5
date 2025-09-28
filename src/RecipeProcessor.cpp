@@ -4,13 +4,9 @@
 
 static const char* TAG = "RecipeProcessor";
 
-RecipeProcessor::RecipeProcessor(DeviceState& deviceState, SemaphoreHandle_t& mutex, ConfigManager& configManager, TankManager& tankManager,
-  HX711Scale& scale)
-    : _deviceState(deviceState),
-      _mutex(mutex),
-      _configManager(configManager),
-      _tankManager(tankManager),
-      _scale(scale)
+RecipeProcessor::RecipeProcessor(
+  DeviceState& deviceState, SemaphoreHandle_t& mutex, ConfigManager& configManager, TankManager& tankManager, HX711Scale& scale)
+    : _deviceState(deviceState), _mutex(mutex), _configManager(configManager), _tankManager(tankManager), _scale(scale)
 {}
 
 void RecipeProcessor::begin()
@@ -141,13 +137,15 @@ bool RecipeProcessor::_dispenseIngredient(const uint64_t tankUid, float targetWe
     vTaskDelay(pdMS_TO_TICKS(200)); // Wait for servo power supply to stabilize
     _tankManager.setContinuousServo(servoId, 1.0f);
 
-    const TickType_t timeout = pdMS_TO_TICKS(30000);
-    TickType_t startTime     = xTaskGetTickCount();
 
+    TickType_t startTime = xTaskGetTickCount();
+    float prevLoopWeight = _scale.getWeight() - initialWeight;
     while (dispensedWeight < targetWeight) {
         dispensedWeight = _scale.getWeight() - initialWeight;
-
-        if (xTaskGetTickCount() - startTime > timeout) {
+        if (abs(dispensedWeight - prevLoopWeight) < _deviceState.Settings.getDispensingWeightChangeThreshold())
+            startTime = xTaskGetTickCount();
+        const TickType_t timeoutTicks = pdMS_TO_TICKS(_deviceState.Settings.getDispensingNoWeightChangeTimeout_ms());
+        if ((xTaskGetTickCount() - startTime) > timeoutTicks) {
             ESP_LOGE(TAG, "Dispense timed out for tank 0x%016llx.", tankUid);
             if (xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
                 _deviceState.lastError = "Dispense operation timed out.";
@@ -172,7 +170,7 @@ bool RecipeProcessor::_dispenseIngredient(const uint64_t tankUid, float targetWe
             _tankManager.setContinuousServo(servoId, 0.2f);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(DISPENSING_LOOP_PERIOD_MS));
     }
 
     _tankManager.setContinuousServo(servoId, 0.0f);

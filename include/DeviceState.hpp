@@ -83,6 +83,30 @@ struct DeviceState {
 
     // Servo Power
     bool servoPower = false;
+
+    // Nested class for managing persistent device settings.
+    class Settings_t {
+      public:
+        Settings_t(); // Constructor loads settings from SPIFFS
+        void resetToDefaults(bool save = true);
+
+        // Getters
+        float getDispensingWeightChangeThreshold() const;
+        uint32_t getDispensingNoWeightChangeTimeout_ms() const;
+        uint8_t getScaleSamplesCount() const;
+
+        // Setters (These automatically save changes to SPIFFS)
+        void setDispensingWeightChangeThreshold(float newValue);
+        void setDispensingNoWeightChangeTimeout_ms(uint32_t value);
+        void setScaleSamplesCount(uint8_t value);
+
+      private:
+        float _dispensingWeightChangeThreshold;
+        uint32_t _dispensingNoWeightChangeTimeout_ms;
+        uint8_t _scaleSamplesCount;
+    };
+    
+    Settings_t Settings;
 };
 
 extern DeviceState globalDeviceState;

@@ -108,10 +108,13 @@ class TankManager {
   public:
     // Constructor now takes ServoController directly.
     TankManager(DeviceState& deviceState, SemaphoreHandle_t& mutex)
-        : _deviceState(deviceState), _deviceStateMutex(mutex), _pwm(Adafruit_PWMServoDriver()), _isServoMode(false), _swiMux(SWIMUX_SERIAL_DEVICE, SWIMUX_TX_PIN, SWIMUX_RX_PIN), _lastPresenceReport { 0, 0 }
-    {
-
-    }
+        : _deviceState(deviceState),
+          _deviceStateMutex(mutex),
+          _pwm(Adafruit_PWMServoDriver()),
+          _isServoMode(false),
+          _swiMux(SWIMUX_SERIAL_DEVICE, SWIMUX_TX_PIN, SWIMUX_RX_PIN),
+          _lastPresenceReport { 0, 0 }
+    {}
 
     /** @brief Initialize the multiplexed OneWire setup but does not start the task. */
     void begin(uint16_t hopper_closed_pwm, uint16_t hopper_open_pwm);
@@ -156,7 +159,6 @@ class TankManager {
     inline bool disableSwiMux() { return _swiMux.sleep(); }
 
     // --- Servo Control Methods ---
-    void setServoPWM(uint8_t servoNum, uint16_t pwm);
     void setServoPower(bool on);
     void setContinuousServo(uint8_t servoNum, float speed); // speed from -1.0 to 1.0
     void stopAllServos();
@@ -172,11 +174,12 @@ class TankManager {
 #endif
 
   private:
+    friend void servoTestMenu(TankManager& tankManager);
     static constexpr uint32_t SWIMUX_POWERUP_DELAY_MS     = 100;
     static constexpr TickType_t MUTEX_ACQUISITION_TIMEOUT = pdMS_TO_TICKS(2000);
 
     DeviceState& _deviceState;
-    SemaphoreHandle_t &_deviceStateMutex;
+    SemaphoreHandle_t& _deviceStateMutex;
     Adafruit_PWMServoDriver _pwm;
     uint16_t _hopperOpenPwm;
     uint16_t _hopperClosedPwm;
@@ -197,6 +200,9 @@ class TankManager {
     // --- PCA9685 Mode Switching Helpers ---
     void _switchToSwiMode();
     void _switchToServoMode();
+    // Servo control private methods.
+    void setServoPWM(uint8_t servoNum, uint16_t pwm);
+
 
     // --- Fixed-point conversion helpers ---
     static inline double q3_13_to_double(uint16_t q_val) { return (double)q_val / 8192.0; }
