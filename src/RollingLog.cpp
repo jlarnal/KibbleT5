@@ -20,7 +20,7 @@ RollingLog::~RollingLog() {
         _file.close();
     }
     if (_buffer) {
-        free(_buffer);
+        heap_caps_free(_buffer);
     }
 }
 
@@ -47,7 +47,7 @@ bool RollingLog::begin(bool formatIfCorrupt) {
         // If it doesn't exist, try to create it.
         _file = _fs.open(_path, "w+");
         if (!_file) {
-            free(_buffer);
+            heap_caps_free(_buffer);
             _buffer = nullptr;
             return false; // Cannot open or create file.
         }
@@ -58,14 +58,14 @@ bool RollingLog::begin(bool formatIfCorrupt) {
         if (formatIfCorrupt) {
             if (!initializeLogFile()) {
                 _file.close();
-                free(_buffer);
+                heap_caps_free(_buffer);
                 _buffer = nullptr;
                 return false;
             }
         } else {
             // Not allowed to format, so fail.
             _file.close();
-            free(_buffer);
+            heap_caps_free(_buffer);
             _buffer = nullptr;
             return false;
         }
