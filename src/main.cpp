@@ -37,21 +37,17 @@ static const char* OTATAG = "OTA update";
 void feedingTask(void* pvParameters);
 void battAndOTA_Task(void* pvParameters);
 
+#ifdef LOG_TO_SPIFFS
+#include "RollingLog.hpp"
+#define MAX_SPIFFS_LOG_SIZE (262144UL)
+static RollingLog _spiffsLog(SPIFFS, "log.txt", 64 * 1024);
+static bool open_spiffs_log();
+static int log_to_spiff(const char*, va_list);
+
+#endif
+
 void setup()
 {
-    Serial.setTxBufferSize(1024);
-    Serial.setDebugOutput(true);
-    Serial.begin(115200);
-    
-    ESP_LOGI(TAG, "--- KibbleT5 Starting Up ---");
-
-    xDeviceStateMutex = xSemaphoreCreateMutex();
-    if (xDeviceStateMutex == NULL) {
-        ESP_LOGE(TAG, "Fatal: Could not create device state mutex.");
-        return;
-    } else {
-        ESP_LOGI(TAG, "Device state mutex instantiated.");
-    }
 
     if (!SPIFFS.begin()) {
         ESP_LOGE(TAG, "Fatal: Could not initialize SPIFFS partition.");
@@ -66,6 +62,38 @@ void setup()
             file = root.openNextFile();
         }
     }
+
+
+    Serial.setTxBufferSize(1024);
+    Serial.begin(115200);
+    // Wait a moment for serial to initialize
+    delay(1000);
+#ifdef LOG_TO_SPIFFS
+    if (open_spiffs_log()) {
+        // Redirect all esp_log output (log_i, log_e, etc.) to our custom function.
+        esp_log_set_vprintf(log_to_spiff);
+        Serial.println("Redirected ESP_LOG to SPIFFS file.");
+    } else {
+        // Fallback to default Serial output if SPIFFS fails.
+        Serial.println("Failed to initialize SPIFFS logging. Using Serial output.");
+        Serial.setDebugOutput(true);
+    }
+#else
+    Serial.println("LOG_TO_SPIFFS is not defined. Using Serial output.");
+    Serial.setDebugOutput(true);
+#endif
+
+    ESP_LOGI(TAG, "--- KibbleT5 Starting Up ---");
+
+    xDeviceStateMutex = xSemaphoreCreateMutex();
+    if (xDeviceStateMutex == NULL) {
+        ESP_LOGE(TAG, "Fatal: Could not create device state mutex.");
+        return;
+    } else {
+        ESP_LOGI(TAG, "Device state mutex instantiated.");
+    }
+
+
 
     configManager.begin();
     display.begin();
@@ -198,3 +226,23 @@ void feedingTask(void* pvParameters)
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
+
+
+#ifdef LOG_TO_SPIFFS
+bool open_spiffs_log()
+{
+
+    if (_spiffsLog.begin(true)) {
+        ESP_LOGI(TAG, "SPIFFS log.txt opened successfully.");
+        return true;
+    } else {
+        ESP_LOGE(TAG, "Failed to open SPIFFS log.txt.");
+    }
+    return false;
+}
+
+int log_to_spiff(const char* format, va_list args)
+{
+    return _spiffsLog.vprintf(format, args);
+}
+#endif // LOG_TO_SPIFFS
