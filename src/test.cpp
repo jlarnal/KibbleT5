@@ -1,3 +1,6 @@
+
+#ifdef KIBBLET5_DEBUG_ENABLED
+
 #include <Arduino.h>
 #include <WiFi.h>
 #include "test.h"
@@ -185,7 +188,7 @@ void servoTestMenu(TankManager& tankManager)
     }
 }
 
-#ifdef SWIMUX_DEBUG_ENABLED
+
 void swiMuxMenu(TankManager& tankManager)
 {
     bool testing = true;
@@ -195,9 +198,10 @@ void swiMuxMenu(TankManager& tankManager)
         Serial.println("2. Scan a specific bus (0-5)");
         Serial.println("3. Scan all buses sequentially");
         Serial.println("4. Put SwiMux to sleep");
-#ifdef SWIMUX_DEBUG_ENABLED
+
+
         Serial.println("5. Raw serial port access");
-#endif
+
         Serial.println("q. Back to Main Menu");
         Serial.print("Enter choice: ");
 
@@ -210,9 +214,9 @@ void swiMuxMenu(TankManager& tankManager)
         Serial.println();
 
         switch (choice) {
-            case '1':
+            case '1': // Get presence report
                 {
-                    SwiMuxPresenceReport_t res = { 0, 0 };
+                    SwiMuxPresenceReport_t res = tankManager.testSwiMuxAwaken();
                     if (res.busesCount) {
                         Serial.printf("The SwiMux interface awake, %d tanks slots, %d tanks connected, map:%s.\r\n", res.busesCount,
                           __builtin_popcount(res.presences), toBinaryString(res.presences).c_str());
@@ -222,7 +226,7 @@ void swiMuxMenu(TankManager& tankManager)
                 }
                 break;
 
-            case '2':
+            case '2': // Scan specific bus (gets UID)
                 {
                     Serial.print("Enter bus number to scan [0..5]:>");
                     int busIndex = readSerialInt();
@@ -266,7 +270,7 @@ void swiMuxMenu(TankManager& tankManager)
                 Serial.println("Press \033[91m [Ctrl]+[Z] \033[0m to exit.");
                 {
                     int outChar, inChar;
-                    HardwareSerial& swiPort = tankManager.getSwiMuxPort();
+                    HardwareSerial& swiPort = tankManager.testGetSwiMuxPort();
                     do {
                         outChar = Serial.read();
                         if (outChar >= 0) {
@@ -295,10 +299,6 @@ void swiMuxMenu(TankManager& tankManager)
         }
     }
 }
-#else
-void swiMuxMenu(TankManager& tankManager) {}
-#endif
-
 
 void runCalibrationSequence(HX711Scale& scale)
 {
@@ -447,7 +447,8 @@ void doDebugTest(TankManager& tankManager, HX711Scale& scale)
         }
     } while (entry < 0);
 
-
+    if (entry != 13)
+        return;
 
     flushSerialInputBuffer();
 
@@ -488,3 +489,6 @@ void doDebugTest(TankManager& tankManager, HX711Scale& scale)
         }
     }
 }
+
+#endif
+

@@ -60,7 +60,7 @@ class SwiMuxSerial_t {
     SwiMuxResult_e getUid(uint8_t busIndex, uint64_t& result, uint32_t timeout_ms = GETUID_TIMEOUT_MS);
 
 
-#ifdef SWIMUX_DEBUG_ENABLED
+#ifdef KIBBLET5_DEBUG_ENABLED
     inline void printRawString(const char* str) { _sPort.print(str); }
     inline HardwareSerial& getSerialPort() { return _sPort; }
 

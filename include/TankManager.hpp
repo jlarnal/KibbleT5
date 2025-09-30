@@ -166,15 +166,19 @@ class TankManager {
     void closeHopper();
 
 
-#ifdef SWIMUX_DEBUG_ENABLED
+#ifdef KIBBLET5_DEBUG_ENABLED
     // Public methods for the hardware test suite
     SwiMuxPresenceReport_t testSwiMuxAwaken();
     bool testSwiMuxSleep(), testSwiBusUID(uint8_t index, uint64_t& result);
-    inline HardwareSerial& getSwiMuxPort() { return _swiMux.getSerialPort(); }
+    inline HardwareSerial& testGetSwiMuxPort() { return _swiMux.getSerialPort(); }
+
 #endif
 
   private:
+#ifdef KIBBLET5_DEBUG_ENABLED
+    friend void swiMuxMenu(TankManager& tankManager);
     friend void servoTestMenu(TankManager& tankManager);
+#endif
     static constexpr uint32_t SWIMUX_POWERUP_DELAY_MS     = 100;
     static constexpr TickType_t MUTEX_ACQUISITION_TIMEOUT = pdMS_TO_TICKS(2000);
 

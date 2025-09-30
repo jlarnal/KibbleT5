@@ -37,19 +37,19 @@ static void _saveSettingsToFile(const DeviceState::Settings_t& settings)
  * @brief Loads settings from the SPIFFS file into the in-memory struct.
  * Called once at startup. If the file doesn't exist, it initializes with defaults.
  */
-static void _loadSettingsFromFile(DeviceState::Settings_t& settings)
-{
+static bool _loadSettingsFromFile(DeviceState::Settings_t& settings)
+{    
     if (!SPIFFS.exists(SETTINGS_FILE)) {
         ESP_LOGW(TAG, "Settings file not found. Initializing with defaults and creating file.");
         settings.resetToDefaults(); // This will also trigger the first save.
-        return;
+        return false;
     }
 
     File file = SPIFFS.open(SETTINGS_FILE, FILE_READ);
     if (!file) {
         ESP_LOGE(TAG, "Failed to open settings file for reading. Using defaults.");
         settings.resetToDefaults();
-        return;
+        return false;
     }
 
     JsonDocument doc;
@@ -59,7 +59,7 @@ static void _loadSettingsFromFile(DeviceState::Settings_t& settings)
     if (error) {
         ESP_LOGE(TAG, "Failed to parse settings file. Using defaults. Error: %s", error.c_str());
         settings.resetToDefaults();
-        return;
+        return false;
     }
 
     // Load values from JSON, using defaults as a fallback if a key is missing.
@@ -68,16 +68,17 @@ static void _loadSettingsFromFile(DeviceState::Settings_t& settings)
     settings.setScaleSamplesCount(doc["scaleSamplesCount"] | 5);
 
     ESP_LOGI(TAG, "Settings loaded successfully from %s", SETTINGS_FILE);
+    return true;
 }
 
 
 // --- Public Method Implementations ---
 
 // Constructor: Initializes settings to their default values and then tries to load from SPIFFS.
-DeviceState::Settings_t::Settings_t()
+bool DeviceState::Settings_t::begin()
 {
     resetToDefaults(false); // Initialize without saving
-    _loadSettingsFromFile(*this);
+    return _loadSettingsFromFile(*this);
 }
 
 // Resets all settings to their default values and optionally saves to file.

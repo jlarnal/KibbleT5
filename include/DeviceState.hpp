@@ -87,7 +87,7 @@ struct DeviceState {
     // Nested class for managing persistent device settings.
     class Settings_t {
       public:
-        Settings_t(); // Constructor loads settings from SPIFFS
+        bool begin();
         void resetToDefaults(bool save = true);
 
         // Getters

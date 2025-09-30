@@ -33,14 +33,19 @@ Battery battMon(3000, 4200, BATT_HALFV_PIN);
 static const char* TAG    = "main";
 static const char* OTATAG = "OTA update";
 
+#ifndef KIBBLET5_DEBUG_ENABLED
+#define LOG_TO_SPIFFS
+#endif
+
 // --- Prototypes for RTOS Tasks ---
 void feedingTask(void* pvParameters);
 void battAndOTA_Task(void* pvParameters);
 
 #ifdef LOG_TO_SPIFFS
+
 #include "RollingLog.hpp"
 #define MAX_SPIFFS_LOG_SIZE (262144UL)
-static RollingLog _spiffsLog(SPIFFS, "log.txt", 64 * 1024);
+static RollingLog _spiffsLog(SPIFFS, "/log.txt", 64 * 1024);
 static bool open_spiffs_log();
 static int log_to_spiff(const char*, va_list);
 
@@ -68,18 +73,25 @@ void setup()
     Serial.begin(115200);
     // Wait a moment for serial to initialize
     delay(1000);
+
 #ifdef LOG_TO_SPIFFS
     if (open_spiffs_log()) {
         // Redirect all esp_log output (log_i, log_e, etc.) to our custom function.
+        _spiffsLog.print("\r\n<ESP32 restart>\r\n");
+        _spiffsLog.flush();
         esp_log_set_vprintf(log_to_spiff);
+        esp_log_level_set("*", esp_log_level_t::ESP_LOG_WARN);
+        vTaskDelay(pdMS_TO_TICKS(50));
         Serial.println("Redirected ESP_LOG to SPIFFS file.");
     } else {
         // Fallback to default Serial output if SPIFFS fails.
-        Serial.println("Failed to initialize SPIFFS logging. Using Serial output.");
+        Serial.print("Failed to initialize SPIFFS logging. Using Serial output.\r\n");
         Serial.setDebugOutput(true);
     }
 #else
     Serial.println("LOG_TO_SPIFFS is not defined. Using Serial output.");
+    esp_log_level_set("*", esp_log_level_t::ESP_LOG_INFO);
+
     Serial.setDebugOutput(true);
 #endif
 
@@ -94,7 +106,7 @@ void setup()
     }
 
 
-
+    globalDeviceState.Settings.begin();
     configManager.begin();
     display.begin();
     display.showBootScreen();
@@ -106,9 +118,10 @@ void setup()
     tankManager.begin(hopper_closed, hopper_open);
     scale.begin(HX711_DATA_PIN, HX711_CLOCK_PIN);
 
+#ifdef KIBBLET5_DEBUG_ENABLED
     // --- RUN DIAGNOSTIC AND TEST CLI ---
     doDebugTest(tankManager, scale);
-
+#endif
 
     bool wifiConnected = webServer.manageWiFiConnection();
 
@@ -139,7 +152,18 @@ void setup()
 
 void loop()
 {
-    vTaskDelete(NULL);
+
+#ifdef LOG_TO_SPIFFS
+    static uint32_t elapsed = 0U, loopCount = 0U;
+    if ((millis() - elapsed) > 500) {
+        elapsed = millis();
+        ESP_LOGI("loop", "Iteration #%u, this message is purposefully longer than it should.\r\n", loopCount);
+        Serial.printf("Iteration #%u, this message is purposefully longer than it should.\r\n", loopCount);
+        loopCount++;
+    }
+    vTaskDelay(50);
+#endif
+    //   vTaskDelete(NULL);
 }
 
 void battAndOTA_Task(void* pvParameters)
@@ -243,6 +267,9 @@ bool open_spiffs_log()
 
 int log_to_spiff(const char* format, va_list args)
 {
-    return _spiffsLog.vprintf(format, args);
+    int result = _spiffsLog.vprintf(format, args);
+    Serial.printf("Wrote %d chars to log.\r\n", result);
+    return result;
 }
+
 #endif // LOG_TO_SPIFFS
