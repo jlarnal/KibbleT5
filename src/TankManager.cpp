@@ -98,6 +98,7 @@ void TankManager::begin(uint16_t hopper_closed_pwm, uint16_t hopper_open_pwm)
 
     // Init PCA9685
     _pwm.begin();
+    _pwm.setFull(-1, 0);
 
     // Configure pins and their respective default levels.
     _swiMux.begin();
@@ -115,15 +116,25 @@ void TankManager::_switchToSwiMode()
 {
     _isServoMode = false;
     _pwm.setPWMFreq(50); // Low frequency for DC power
-    for (int i = 0; i < NUMBER_OF_BUSES; i++) {
-        _pwm.setPWM(i, 4095, 0); // 100% duty cycle to power SWI pull-ups
+    PCA9685::I2C_Result_e res = _pwm.setFull(-1, true); // Set all channels full on (powers the AT21CS01 eeproms through their pullpup resistors)
+    if (res) {
+        ESP_LOGE(TAG, "PCA9685 \"all full on\" failed (I2C error #%d)", res);
+    } else {
+        ESP_LOGI(TAG, "PCA9685 switched to SWI power mode.");
     }
-    ESP_LOGI(TAG, "PCA9685 switched to SWI power mode.");
 }
+
 
 void TankManager::_switchToServoMode()
 {
     _pwm.setPWMFreq(50); // Standard servo frequency
+    _pwm.setFull(-1, false); // Set all channel to mute for now.
+    // Set each connected tank pulse duration to its idle value.
+    for (auto t : _knownTanks) {
+        _pwm.writeMicroseconds(t.busIndex, t.servoIdlePwm);
+    }
+    // Wait for a full RC servo cycle to elapse.
+    vTaskDelay(pdMS_TO_TICKS(20) + 1); // 20ms plus chaff.
     _isServoMode = true;
     ESP_LOGI(TAG, "PCA9685 switched to Servo PWM mode.");
 }
@@ -134,6 +145,7 @@ void TankManager::_tankDetectionTask(void* pvParam)
         return;
     TankManager* pInst = (TankManager*)pvParam;
     SwiMuxPresenceReport_t currReport;
+    uint16_t presenceChanges, prevPresences = 0;
     while (1) {
         if (pInst->_swiMux.isAsleep() && !pInst->_isServoMode) {
             currReport = pInst->_lastPresenceReport;
@@ -143,8 +155,10 @@ void TankManager::_tankDetectionTask(void* pvParam)
                 }
                 xSemaphoreGiveRecursive(pInst->_swimuxMutex);
             }
-            if (currReport.busesCount)
-                pInst->refresh(currReport.presences);
+            presenceChanges = prevPresences ^ currReport.presences;
+            prevPresences   = currReport.presences;
+            if (presenceChanges)
+                pInst->refresh(presenceChanges);
         }
         vTaskDelay(pdMS_TO_TICKS(250));
     }
@@ -283,6 +297,109 @@ TankInfo::TankInfoDiscrepancies_e TankInfo::toTankData(TankEEpromData_t& eeprom)
 }
 
 
+void TankManager::refresh(uint16_t refreshMap)
+{
+    // Based on the code, we assume there are 6 buses.
+    constexpr uint16_t allBusesMask = (1 << NUMBER_OF_BUSES) - 1;
+
+    refreshMap &= allBusesMask;
+
+    // If all buses are to be refreshed, use the optimized fullRefresh method.
+    if (refreshMap == allBusesMask) {
+        fullRefresh();
+        return;
+    }
+
+    // If no specific buses are requested for refresh, do nothing.
+    if (refreshMap == 0) {
+        return;
+    }
+
+    if (_isServoMode) {
+        ESP_LOGW(TAG, "Cannot refresh tank presence while in servo mode.");
+        return;
+    }
+
+    if (xSemaphoreTakeRecursive(_swimuxMutex, MUTEX_ACQUISITION_TIMEOUT) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to acquire SwiMux mutex for refresh!");
+        return;
+    }
+
+    // Iterate through each bus index to see if it needs refreshing.
+    for (uint8_t busIndex = 0; busIndex < NUMBER_OF_BUSES; ++busIndex) {
+        // Check if the current bus is in the refresh map.
+        if (!((refreshMap >> busIndex) & 1)) {
+            continue;
+        }
+
+        uint64_t uidOnBus = 0;
+        bool isPresent    = (_swiMux.getUid(busIndex, uidOnBus) == SMREZ_OK) && (uidOnBus != 0);
+
+        // Find if we have a tank currently registered at this bus index in our known list.
+        TankInfo* knownTankOnBus = getKnownTankOfBus(busIndex);
+
+        if (isPresent) {
+            // A device is physically connected to this bus.
+
+            // See if we know about this specific device (by UID), regardless of where it is.
+            TankInfo* knownTankWithUid = getKnownTankOfUis(uidOnBus);
+
+            // Situation: The bus was supposed to have tank A, but we now detect tank B.
+            // Tank A must have been removed.
+            if (knownTankOnBus && knownTankOnBus->uid != uidOnBus) {
+                ESP_LOGI(TAG, "Tank on bus %d changed. Removing old tank with UID 0x%016llX.", busIndex, knownTankOnBus->uid);
+                removeKnownTank(knownTankOnBus);
+                knownTankOnBus = nullptr; // Pointer is now invalid.
+            }
+
+            TankInfo* tankToUpdate = knownTankWithUid;
+
+            if (!tankToUpdate) {
+                // This is a completely new tank. Add it to our list.
+                ESP_LOGI(TAG, "New tank with UID 0x%016llX detected on bus %d.", uidOnBus, busIndex);
+                _knownTanks.emplace_back();
+                tankToUpdate      = &_knownTanks.back();
+                tankToUpdate->uid = uidOnBus;
+            }
+
+            // At this point, tankToUpdate points to the correct tank object in our list.
+            // Update its bus index and refresh its full info from its EEPROM.
+            tankToUpdate->busIndex = busIndex;
+
+            TankEEpromData_t data;
+            uint8_t* eeData = reinterpret_cast<uint8_t*>(&data);
+            int retries     = 3;
+            bool readOk     = false;
+            do {
+                if (_swiMux.read(busIndex, eeData, 0, sizeof(TankEEpromData_t)) == SMREZ_OK) {
+                    tankToUpdate->fillFromEeprom(data);
+                    readOk = true;
+                    break;
+                }
+            } while (--retries);
+
+            if (!readOk) {
+                ESP_LOGE(TAG, "Could not read EEPROM from tank #%d, UID 0x%016llX", busIndex, uidOnBus);
+                // If this was a newly added tank, it's useless if we can't read it, so remove it.
+                if (!knownTankWithUid) {
+                    removeKnownTank(tankToUpdate);
+                }
+            }
+
+        } else {
+            // No device is physically connected to this bus.
+            // If we thought there was one, it has been disconnected.
+            if (knownTankOnBus) {
+                ESP_LOGI(TAG, "Tank with UID 0x%016llX on bus %d is no longer present. Removing.", knownTankOnBus->uid, busIndex);
+                removeKnownTank(knownTankOnBus);
+            }
+        }
+    }
+
+    xSemaphoreGiveRecursive(_swimuxMutex);
+}
+
+
 
 void TankManager::fullRefresh()
 {
@@ -345,10 +462,43 @@ bool TankManager::updateEeprom(TankEEpromData_t& data, TankInfo::TankInfoDiscrep
     return true;
 }
 
+TankInfo* TankManager::getKnownTankOfUis(uint64_t uid)
+{
+    // Use 'auto&' to get a reference to the element
+    for (auto& tank : _knownTanks) {
+        if (tank.uid == uid) {
+            return &tank;
+        }
+    }
+    return nullptr; // It's good practice to return nullptr if nothing is found
+}
+
+TankInfo* TankManager::getKnownTankOfBus(uint8_t busIndex)
+{
+    // Use 'auto&' to get a reference to the element
+    for (auto& tank : _knownTanks) {
+        if (tank.busIndex == busIndex) {
+            return &tank;
+        }
+    }
+    return nullptr; // It's good practice to return nullptr if nothing is found
+}
+
+void TankManager::removeKnownTank(TankInfo* tankToRemove)
+{
+    if (tankToRemove == nullptr)
+        return;
+    // 2. Use std::remove_if to move the target element to the end of the vector.
+    // The lambda function identifies the element by comparing its memory address.
+    auto newEnd = std::remove_if(_knownTanks.begin(), _knownTanks.end(), [&](const TankInfo& tank) { return &tank == tankToRemove; });
+
+    // 3. Actually erase the element(s) from the vector.
+    _knownTanks.erase(newEnd, _knownTanks.end());
+}
 
 int8_t TankManager::getBusOfTank(const uint64_t tankUid)
 {
-    if (_isServoMode){
+    if (_isServoMode) {
         ESP_LOGE(TAG, "Call to `TankManager::getBusOfTank` while in servo mode.");
         return -1;
     }
@@ -372,8 +522,8 @@ int8_t TankManager::getBusOfTank(const uint64_t tankUid)
 // Handles updating the tank's configuration in its EEPROM.
 bool TankManager::commitTankInfo(const TankInfo& tankInfo)
 {
-    if (_isServoMode){
-        ESP_LOGE(TAG,"Call to commitTankInfo while in servo mode");
+    if (_isServoMode) {
+        ESP_LOGE(TAG, "Call to commitTankInfo while in servo mode");
         return false;
     }
     if (xSemaphoreTakeRecursive(_swimuxMutex, MUTEX_ACQUISITION_TIMEOUT) != pdTRUE) {
@@ -418,8 +568,8 @@ bool TankManager::commitTankInfo(const TankInfo& tankInfo)
 
 bool TankManager::refreshTankInfo(TankInfo& tankInfo)
 {
-    if (_isServoMode){
-        ESP_LOGE(TAG,"Call to refreshTankInfo while in servo mode.");
+    if (_isServoMode) {
+        ESP_LOGE(TAG, "Call to refreshTankInfo while in servo mode.");
         return false;
     }
     // 1. The UID must be provided in the tankInfo struct.
@@ -462,8 +612,8 @@ bool TankManager::refreshTankInfo(TankInfo& tankInfo)
 
 bool TankManager::updateRemaingKibble(const uint64_t uid, uint16_t newRemainingGrams)
 {
-    if (_isServoMode){
-        ESP_LOGE(TAG,"Call to updateRemaingKibble while in servo mode.");
+    if (_isServoMode) {
+        ESP_LOGE(TAG, "Call to updateRemaingKibble while in servo mode.");
         return false;
     }
     if (xSemaphoreTakeRecursive(_swimuxMutex, MUTEX_ACQUISITION_TIMEOUT) != pdTRUE) {
@@ -543,25 +693,25 @@ void TankManager::setServoPower(bool on)
 {
     if (on) {
         _switchToServoMode();
-    } else {        
+    } else {
         _switchToSwiMode();
     }
     digitalWrite(SERVO_POWER_ENABLE_PIN, on ? LOW : HIGH);
     ESP_LOGI(TAG, "Servo power %s", on ? "ON" : "OFF");
 }
 
-void TankManager::setServoPWM(uint8_t servoNum, uint16_t pwm)
+PCA9685::I2C_Result_e TankManager::setServoPWM(uint8_t servoNum, uint16_t pwm)
 {
     if (servoNum >= NUMBER_OF_BUSES)
-        return;
+        return PCA9685::I2C_Result_e::I2C_Unknown;
     if (!_isServoMode)
         _switchToServoMode();
 
     uint16_t ticks = map(pwm, 0, 20000, 0, 4095);
-    _pwm.setPWM(servoNum, 0, ticks);
+    return _pwm.setPWM(servoNum, 0, ticks);
 }
 
-void TankManager::setContinuousServo(uint8_t servoNum, float speed)
+PCA9685::I2C_Result_e TankManager::setContinuousServo(uint8_t servoNum, float speed)
 {
     if (!_isServoMode) {
         ESP_LOGI(TAG, "Switching out of SWI mode to set continuous servo speed.");
@@ -574,44 +724,39 @@ void TankManager::setContinuousServo(uint8_t servoNum, float speed)
         speed = -1.0;
 
     if (abs(speed) < 0.01) {
-        setServoPWM(servoNum, SERVO_CONTINUOUS_STOP_PWM);
+        return setServoPWM(servoNum, SERVO_CONTINUOUS_STOP_PWM);
     } else if (speed > 0) {
         uint16_t pwm = map(speed * 100, 0, 100, SERVO_CONTINUOUS_STOP_PWM, SERVO_CONTINUOUS_FWD_PWM);
-        setServoPWM(servoNum, pwm);
+        return setServoPWM(servoNum, pwm);
     } else {
         uint16_t pwm = map(speed * 100, -100, 0, SERVO_CONTINUOUS_REV_PWM, SERVO_CONTINUOUS_STOP_PWM);
-        setServoPWM(servoNum, pwm);
+        return setServoPWM(servoNum, pwm);
     }
 }
 
-void TankManager::stopAllServos() {
+PCA9685::I2C_Result_e TankManager::stopAllServos()
+{
     if (!_isServoMode) {
-          ESP_LOGI(TAG, "Switching out of SWI mode to stop all Servos.");      
-       _switchToServoMode(); // Ensure we are in a mode where we can send stop commands
+        ESP_LOGI(TAG, "Switching out of SWI mode to stop all Servos.");
+        _switchToServoMode(); // Ensure we are in a mode where we can send stop commands
     }
 
     // 1. Command all servos to their neutral/stop position
+    PCA9685::I2C_Result_e result = PCA9685::I2C_Result_e::I2C_Success;
     for (uint8_t i = 0; i < 16; i++) {
-        setContinuousServo(i, 0.0);
+        PCA9685::I2C_Result_e res = setContinuousServo(i, 0.0);
+        if (!result && res)
+            result = res;
     }
 
     // 2. CRITICAL: Wait a moment for the servos to physically stop moving
     vTaskDelay(pdMS_TO_TICKS(100));
 
     // 3. Now, safely cut the power and switch the PCA9685 back to SWI mode
-    setServoPower(false); 
-    
+    setServoPower(false);
+
     ESP_LOGW(TAG, "All servos stopped and powered off.");
-}
-
-void TankManager::openHopper()
-{
-    setServoPWM(0, _hopperOpenPwm);
-}
-
-void TankManager::closeHopper()
-{
-    setServoPWM(0, _hopperClosedPwm);
+    return result;
 }
 
 

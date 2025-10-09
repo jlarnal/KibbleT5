@@ -157,7 +157,10 @@ void servoTestMenu(TankManager& tankManager)
                     Serial.print("Enter PWM value for all 8 servos: ");
                     int pwm = readSerialInt();
                     for (int i = 0; i < 8; i++) {
-                        tankManager.setServoPWM(i, pwm);
+                        PCA9685::I2C_Result_e res = tankManager.setServoPWM(i, pwm);
+                        if (res) {
+                            Serial.printf("Servo #%d encountered I2C error #%d\r\n", i, res);
+                        }
                     }
                     Serial.printf("Set servos 0-7 to %d μs.\n", pwm);
                     break;
@@ -211,8 +214,7 @@ void swiMuxMenu(TankManager& tankManager)
         }
         char choice = Serial.read();
         Serial.print(choice);
-        Serial.println();
-
+        Serial.println();        
         switch (choice) {
             case '1': // Get presence report
                 {
@@ -491,4 +493,3 @@ void doDebugTest(TankManager& tankManager, HX711Scale& scale)
 }
 
 #endif
-

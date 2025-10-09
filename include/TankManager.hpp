@@ -3,7 +3,7 @@
 
 #include <string>
 #include <vector>
-#include <Adafruit_PWMServoDriver.h>
+#include "PCA9685.h"
 #include "freertos/semphr.h"
 #include "board_pinout.h"
 #include <SwiMuxSerial.h>
@@ -110,7 +110,7 @@ class TankManager {
     TankManager(DeviceState& deviceState, SemaphoreHandle_t& mutex)
         : _deviceState(deviceState),
           _deviceStateMutex(mutex),
-          _pwm(Adafruit_PWMServoDriver()),
+          _pwm(PCA9685()),
           _isServoMode(false),
           _swiMux(SWIMUX_SERIAL_DEVICE, SWIMUX_TX_PIN, SWIMUX_RX_PIN),
           _lastPresenceReport { 0, 0 }
@@ -121,7 +121,7 @@ class TankManager {
     /** @brief Refreshes the local data about connected tanks, by interrogating them. Uses lazy update.
      * @param refreshMap <optional> bit map of the tanks to refresh.
      */
-    void refresh(uint16_t refreshMap = 0xFFFF) { fullRefresh(); }
+    void refresh(uint16_t refreshMap = 0xFFFFU);
 
     void startTask() { xTaskCreate(TankManager::_tankDetectionTask, "TankManager", 3 * 1024, this, 11, &TankManager::_runningTask); }
     /**
@@ -153,6 +153,20 @@ class TankManager {
     int8_t getBusOfTank(const uint64_t tankUid);
 
     /**
+     * @brief Gets (or not) a known TankInfo from its uid.
+     * @param uid The UID signature of the searched tank.
+     * @returns A pointer to the TankInfo bearing the uid, or nullptr if absent.
+     */
+    TankInfo* getKnownTankOfUis(uint64_t uid);
+
+    /**
+     * @brief Gets (or not) a known TankInfo from its bus index.
+     * @param busIndex The bus index of the searched tank.
+     * @returns A pointer to the TankInfo bearing the searched @p busIndex, or nullptr if absent.
+     */
+    TankInfo* getKnownTankOfBus(uint8_t busIndex);
+
+    /**
      * @brief Puts the SwiMux interface to sleep.
      * @return <true> if successful, <false> if no response from the SwiMux.
      */
@@ -160,10 +174,10 @@ class TankManager {
 
     // --- Servo Control Methods ---
     void setServoPower(bool on);
-    void setContinuousServo(uint8_t servoNum, float speed); // speed from -1.0 to 1.0
-    void stopAllServos();
-    void openHopper();
-    void closeHopper();
+    PCA9685::I2C_Result_e setContinuousServo(uint8_t servoNum, float speed); // speed from -1.0 to 1.0
+    PCA9685::I2C_Result_e stopAllServos();
+    PCA9685::I2C_Result_e  openHopper() { return setServoPWM(0, _hopperOpenPwm); }
+    PCA9685::I2C_Result_e  closeHopper() { return setServoPWM(0, _hopperClosedPwm); }
 
 
 #ifdef KIBBLET5_DEBUG_ENABLED
@@ -184,7 +198,7 @@ class TankManager {
 
     DeviceState& _deviceState;
     SemaphoreHandle_t& _deviceStateMutex;
-    Adafruit_PWMServoDriver _pwm;
+    PCA9685 _pwm;
     uint16_t _hopperOpenPwm;
     uint16_t _hopperClosedPwm;
     bool _isServoMode;
@@ -200,12 +214,13 @@ class TankManager {
 
     // Internal list of tanks, which holds the comprehensive state.
     std::vector<TankInfo> _knownTanks;
+    void removeKnownTank(TankInfo* tankToRemove);
 
     // --- PCA9685 Mode Switching Helpers ---
     void _switchToSwiMode();
     void _switchToServoMode();
     // Servo control private methods.
-    void setServoPWM(uint8_t servoNum, uint16_t pwm);
+    PCA9685::I2C_Result_e setServoPWM(uint8_t servoNum, uint16_t pwm);
 
 
     // --- Fixed-point conversion helpers ---
