@@ -9,6 +9,7 @@
 //#include <hal/gpio_ll.h>
 #include <hal/gpio_hal.h>
 
+
 static const char* TAG = "DebugTest";
 
 /**
@@ -21,7 +22,28 @@ static void flushSerialInputBuffer()
     }
 }
 
-// Helper function to wait for and read an integer from Serial, with echo
+//// Helper function to wait for and read an integer from Serial, with echo
+//static int readSerialInt()
+//{
+//    String input = "";
+//    while (true) {
+//        if (Serial.available()) {
+//            char c = Serial.read();
+//            if (c == '\n' || c == '\r') {
+//                Serial.println(); // Move to next line after input is complete
+//                if (input.length() > 0) {
+//                    return input.toInt();
+//                }
+//            } else if (isDigit(c) || c == '-') {
+//                input += c;
+//                Serial.print(c); // Echo each character as it's typed
+//            }
+//        }
+//        vTaskDelay(pdMS_TO_TICKS(10));
+//    }
+//}
+
+// Helper function to wait for and read an integer from Serial, with echo and backspace handling
 static int readSerialInt()
 {
     String input = "";
@@ -29,18 +51,27 @@ static int readSerialInt()
         if (Serial.available()) {
             char c = Serial.read();
             if (c == '\n' || c == '\r') {
-                Serial.println(); // Move to next line after input is complete
                 if (input.length() > 0) {
+                    Serial.println(); // move to next line after input is complete
                     return input.toInt();
+                } else {
+                    Serial.println(); // keep terminal tidy if Enter pressed with empty input
                 }
-            } else if (isDigit(c) || c == '-') {
+            } else if (c == '\b' || c == 127) { // backspace or DEL
+                if (input.length() > 0) {
+                    input.remove(input.length() - 1); // remove last character
+                    Serial.print("\b \b"); // erase last char on terminal
+                }
+            } else if (isDigit(c) || (c == '-' && input.length() == 0)) {
                 input += c;
-                Serial.print(c); // Echo each character as it's typed
+                Serial.print(c); // echo each character as it's typed
             }
+            // ignore any other characters
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
+
 
 // Helper function to wait for and read a float from Serial, with echo
 static float readSerialFloat()
@@ -107,6 +138,61 @@ template <typename T> static String toBinaryString(const T& value)
 
 
 // --- Test Sub-menus ---
+void servoMoveMenu(TankManager& tankManager, int numServo)
+{
+
+    uint16_t pwm = 1500, prev = 0;
+    constexpr uint16_t SMALL_STEP = 50, BIG_STEP = 250;
+    int typed = 0;
+
+    Serial.printf("\r\n[U]/[u] --> increase by %d or %d ms\r\n", BIG_STEP, SMALL_STEP);
+    Serial.printf("[J]/[j] --> decrease by %d or %d ms\r\n", BIG_STEP, SMALL_STEP);
+    Serial.printf("[C/c] --> set back to center (1500ms)\r\n");
+    Serial.printf("[R/r] --> return to Servo Test Menu.\r\n");
+    while (typed != 'r' && typed != 'R') {
+        typed = Serial.read();
+        switch (typed) {
+            case 'u':
+                pwm += SMALL_STEP;
+                break;
+            case 'U':
+                pwm += BIG_STEP;
+                break;
+            case 'j':
+                pwm -= SMALL_STEP;
+                break;
+            case 'J':
+                pwm -= BIG_STEP;
+                break;
+            case 'c':
+            [[fallthrough]]
+            case 'C':
+                pwm = 1500;
+                break;
+            default:
+                break;
+        }
+        if (pwm < 250)
+            pwm = 250;
+        else if (pwm > 2750)
+            pwm = 2750;
+
+
+        if (prev != pwm) {
+            Serial.print("\r                      \r");
+            Serial.print(pwm);
+            prev = pwm;
+        }
+
+        if (numServo > 0) {
+            tankManager.setServoPWM((uint8_t)numServo, pwm);
+        } else {
+            for (int i = 0; i < NUMBER_OF_BUSES; i++)
+                tankManager.setServoPWM(i, pwm);
+        }
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+}
 
 void servoTestMenu(TankManager& tankManager)
 {
@@ -146,23 +232,12 @@ void servoTestMenu(TankManager& tankManager)
                         Serial.println("Invalid servo number.");
                         break;
                     }
-                    Serial.print("Enter PWM value (e.g., 1000-2000): ");
-                    int pwm = readSerialInt();
-                    tankManager.setServoPWM(servoNum, pwm);
-                    Serial.printf("Set servo %d to %d μs.\n", servoNum, pwm);
+                    servoMoveMenu(tankManager, servoNum);
                     break;
                 }
             case '4':
                 {
-                    Serial.print("Enter PWM value for all 8 servos: ");
-                    int pwm = readSerialInt();
-                    for (int i = 0; i < 8; i++) {
-                        PCA9685::I2C_Result_e res = tankManager.setServoPWM(i, pwm);
-                        if (res) {
-                            Serial.printf("Servo #%d encountered I2C error #%d\r\n", i, res);
-                        }
-                    }
-                    Serial.printf("Set servos 0-7 to %d μs.\n", pwm);
+                    servoMoveMenu(tankManager, -1);
                     break;
                 }
             case '5':
@@ -191,19 +266,39 @@ void servoTestMenu(TankManager& tankManager)
     }
 }
 
+static void listenToPort(HardwareSerial& port)
+{
+    int typed;
+    Serial.println("\r\nPress [Q]/[q] to stop listening.\r\n");
+    while (Serial.available())
+        Serial.read();
+    do {
+        if (port.available()) {
+            int received = port.read();
+            if (received > 0)
+                Serial.print((char)received);
+        }
+        vTaskDelay(1);
+        typed = Serial.read();
+    } while (typed != 'q' && typed != 'Q');
+
+    while (Serial.available())
+        Serial.read();
+}
 
 void swiMuxMenu(TankManager& tankManager)
 {
     bool testing = true;
+    tankManager.setServoPower(false);
     while (testing) {
         Serial.println("\n--- SwiMux Test Menu ---");
-        Serial.println("1. Awaken the SwiMux (gets the presence map)");
+        Serial.println("0. Get the presence map");
+        Serial.println("1. Roll call (get all uids)");
         Serial.println("2. Scan a specific bus (0-5)");
         Serial.println("3. Scan all buses sequentially");
         Serial.println("4. Put SwiMux to sleep");
-
-
         Serial.println("5. Raw serial port access");
+        Serial.println("6. Listen to serial port");
 
         Serial.println("q. Back to Main Menu");
         Serial.print("Enter choice: ");
@@ -214,20 +309,32 @@ void swiMuxMenu(TankManager& tankManager)
         }
         char choice = Serial.read();
         Serial.print(choice);
-        Serial.println();        
+        Serial.println();
         switch (choice) {
-            case '1': // Get presence report
+            case '0': // Get presence report
                 {
                     SwiMuxPresenceReport_t res = tankManager.testSwiMuxAwaken();
                     if (res.busesCount) {
-                        Serial.printf("The SwiMux interface awake, %d tanks slots, %d tanks connected, map:%s.\r\n", res.busesCount,
-                          __builtin_popcount(res.presences), toBinaryString(res.presences).c_str());
+                        Serial.printf("The SwiMux interface awake, %d/%d tanks, map:%s.\r\n", __builtin_popcount(res.presences), res.busesCount,
+                          toBinaryString(res.presences).c_str());
                     } else {
                         Serial.println("No response from the SwiMux interface !");
                     }
                 }
                 break;
-
+            case '1':
+                {
+                    RollCallArray_t results;
+                    if (tankManager.testRollCall(results)) {
+                        Serial.printf("Result of the roll call:\r\n");
+                        for (int idx = 0; idx < NUMBER_OF_BUSES; idx++) {
+                            Serial.printf("  [%d]-> %016llX\r\n", idx, results.bus[idx]);
+                        }
+                    } else {
+                        Serial.println("No answer.");
+                    }
+                }
+                break;
             case '2': // Scan specific bus (gets UID)
                 {
                     Serial.print("Enter bus number to scan [0..5]:>");
@@ -240,7 +347,7 @@ void swiMuxMenu(TankManager& tankManager)
                     Serial.printf("Scanning SwiMux bus #%d...", busIndex);
                     uint64_t uid;
                     if (tankManager.testSwiBusUID(busIndex, uid)) {
-                        Serial.printf(" uid read: %08x%08x\r\n", (uint32_t)(uid >> 32), (uint32_t)(uid & UINT32_MAX));
+                        Serial.printf(" uid read %08X%08X\r\n",(int32_t)( uid >> 32), (int32_t)(uid & UINT32_MAX));
                     } else {
                         Serial.println("no response.");
                     }
@@ -249,13 +356,13 @@ void swiMuxMenu(TankManager& tankManager)
 
             case '3':
                 {
-                    Serial.println("Scanning all SwiMux buses (0 to 5):");
+                    Serial.println("Scanning all SwiMux buses (0 to 5):\r\n");
                     for (int i = 0; i < 6; i++) {
                         uint64_t uid;
                         if (tankManager.testSwiBusUID(i, uid)) {
-                            Serial.printf("\t[Bus #%d] uid read: %08x%08x\r\n", i, (uint32_t)(uid >> 32), (uint32_t)(uid & UINT32_MAX));
+                            Serial.printf("\t[Bus #%d] uid reads %08x%08x\r\n", i, (uint32_t)(uid >> 32), (uint32_t)(uid & UINT32_MAX));
                         } else {
-                            Serial.printf("\t[Bus #%d] no response.", i);
+                            Serial.printf("\t[Bus #%d] no response.\r\n", i);
                         }
                         vTaskDelay(pdMS_TO_TICKS(100));
                     }
@@ -288,7 +395,9 @@ void swiMuxMenu(TankManager& tankManager)
                     } while (outChar != 0x1A && inChar != 0x1A); // break upon 'SUB' (ctrl-z)
                 }
                 break;
-
+            case '6':
+                listenToPort(tankManager.testGetSwiMuxPort());
+                break;
             case 'q':
                 [[fallthrough]];
             case 'Q':
@@ -299,6 +408,7 @@ void swiMuxMenu(TankManager& tankManager)
                 Serial.println("Invalid choice.");
                 break;
         }
+        Serial.flush();
     }
 }
 

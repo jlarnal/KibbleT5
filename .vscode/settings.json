@@ -59,6 +59,16 @@
         "gpio_periph.h": "c",
         "esp32-hal-gpio.h": "c",
         "span": "cpp",
-        "format": "cpp"
+        "format": "cpp",
+        "bit": "cpp",
+        "charconv": "cpp",
+        "compare": "cpp",
+        "concepts": "cpp",
+        "netfwd": "cpp",
+        "set": "cpp",
+        "numbers": "cpp",
+        "semaphore": "cpp",
+        "stop_token": "cpp",
+        "variant": "cpp"
     }
 }

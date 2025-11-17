@@ -6,7 +6,7 @@
 #include "PCA9685.h"
 #include "freertos/semphr.h"
 #include "board_pinout.h"
-#include <SwiMuxSerial.h>
+#include "SwiMuxSerial.h"
 
 // Forward-declare DeviceState to break circular dependency.
 struct DeviceState;
@@ -176,22 +176,22 @@ class TankManager {
     void setServoPower(bool on);
     PCA9685::I2C_Result_e setContinuousServo(uint8_t servoNum, float speed); // speed from -1.0 to 1.0
     PCA9685::I2C_Result_e stopAllServos();
-    PCA9685::I2C_Result_e  openHopper() { return setServoPWM(0, _hopperOpenPwm); }
-    PCA9685::I2C_Result_e  closeHopper() { return setServoPWM(0, _hopperClosedPwm); }
+    PCA9685::I2C_Result_e openHopper() { return setServoPWM(0, _hopperOpenPwm); }
+    PCA9685::I2C_Result_e closeHopper() { return setServoPWM(0, _hopperClosedPwm); }
 
 
-#ifdef KIBBLET5_DEBUG_ENABLED
-    // Public methods for the hardware test suite
-    SwiMuxPresenceReport_t testSwiMuxAwaken();
-    bool testSwiMuxSleep(), testSwiBusUID(uint8_t index, uint64_t& result);
-    inline HardwareSerial& testGetSwiMuxPort() { return _swiMux.getSerialPort(); }
-
-#endif
 
   private:
 #ifdef KIBBLET5_DEBUG_ENABLED
     friend void swiMuxMenu(TankManager& tankManager);
-    friend void servoTestMenu(TankManager& tankManager);
+    friend void servoTestMenu(TankManager& tankManager), servoMoveMenu(TankManager& tankManager, int numServo);
+
+    // Public methods for the hardware test suite
+    SwiMuxPresenceReport_t testSwiMuxAwaken();
+    bool testSwiMuxSleep(), testSwiBusUID(uint8_t index, uint64_t& result);
+    inline HardwareSerial& testGetSwiMuxPort() { return _swiMux.getSerialPort(); }
+    bool testRollCall(RollCallArray_t &results);
+
 #endif
     static constexpr uint32_t SWIMUX_POWERUP_DELAY_MS     = 100;
     static constexpr TickType_t MUTEX_ACQUISITION_TIMEOUT = pdMS_TO_TICKS(2000);

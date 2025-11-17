@@ -89,7 +89,7 @@ void setup()
         Serial.setDebugOutput(true);
     }
 #else
-    Serial.println("LOG_TO_SPIFFS is not defined. Using Serial output.");
+    Serial.println("LOG_TO_SPIFFS disabled. Using Serial output.");
     esp_log_level_set("*", esp_log_level_t::ESP_LOG_INFO);
 
     Serial.setDebugOutput(true);

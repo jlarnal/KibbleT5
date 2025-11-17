@@ -106,7 +106,7 @@ void TankManager::begin(uint16_t hopper_closed_pwm, uint16_t hopper_open_pwm)
     pinMode(SERVO_POWER_ENABLE_PIN, OUTPUT);
     digitalWrite(SERVO_POWER_ENABLE_PIN, HIGH); // Start with power off (HIGH for active-low)
 
-    _switchToSwiMode(); // Set PCA9685 to SWI mode by default
+    setServoPower(false);
 
     ESP_LOGI(TAG, "Initializing Tank Manager with SwiMux interface...");
     refresh();
@@ -771,7 +771,7 @@ SwiMuxPresenceReport_t TankManager::testSwiMuxAwaken()
     SwiMuxPresenceReport_t res;
     if (xSemaphoreTakeRecursive(_swimuxMutex, MUTEX_ACQUISITION_TIMEOUT) == pdTRUE) {
 
-        res = _swiMux.getPresence();
+        res = _swiMux.getPresence(3000);
         xSemaphoreGiveRecursive(_swimuxMutex);
         if (res.busesCount > 0) {
             ESP_LOGI(TAG, "SwiMux awakened, %d buses, %d connected, map: 0x%04X", res.busesCount, __builtin_popcount(res.presences), res.presences);
@@ -809,15 +809,23 @@ bool TankManager::testSwiBusUID(uint8_t index, uint64_t& result)
 
     if (xSemaphoreTakeRecursive(_swimuxMutex, MUTEX_ACQUISITION_TIMEOUT) == pdTRUE) {
 
-        bool success = SwiMuxResult_e::SMREZ_OK == _swiMux.getUid(index % 6, result);
+        SwiMuxResult_e res = _swiMux.getUid(index % 6, result);
+
         xSemaphoreGiveRecursive(_swimuxMutex);
-        ESP_LOGI(TAG, "UID acquisition %s", (success ? "successful." : "FAILED !"));
-        return success;
+        if (res == SMREZ_OK)
+            return true;
+        ESP_LOGD(TAG, "UID acquisition failed (%s)", SwiMuxResultString(res));
     } else {
         ESP_LOGE(TAG, "Error: Could not acquire SwiMux mutex for test.");
     }
 
     return false;
+}
+
+bool TankManager::testRollCall(RollCallArray_t& results)
+{
+
+    return _swiMux.rollCall(results) == SwiMuxResult_e::SMREZ_OK;
 }
 
 #pragma endregion
