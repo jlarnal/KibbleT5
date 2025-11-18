@@ -87,8 +87,8 @@ class SwiMuxSerial_t {
     static constexpr size_t AWAKE_RETRIES_DEFAULT = 3;
     static constexpr uint32_t PRESENCE_TIMEOUT_MS = 1 + 2 * UART_DURATION_MS_ROUND(sizeof(SwiMuxPresenceReport_t), DEFAULT_SERIAL_BAUDS);
     static constexpr uint32_t GETUID_TIMEOUT_MS   = 100; //(uint32_t)(10 + 5.0 * UART_DURATION_MS_ROUND(10, DEFAULT_SERIAL_BAUDS));
-    static constexpr uint32_t READ_TIMEOUT_MS     = 250; //(uint32_t)(10 + 5.0 * UART_DURATION_MS_ROUND(140, DEFAULT_SERIAL_BAUDS));
-    static constexpr uint32_t WRITE_TIMEOUT_MS    = 250; //(uint32_t)(10 + 5.0 * UART_DURATION_MS_ROUND(140, DEFAULT_SERIAL_BAUDS));
+    static constexpr uint32_t READ_TIMEOUT_MS     = 600; //(uint32_t)(10 + 5.0 * UART_DURATION_MS_ROUND(140, DEFAULT_SERIAL_BAUDS));
+    static constexpr uint32_t WRITE_TIMEOUT_MS    = 600; //(uint32_t)(10 + 5.0 * UART_DURATION_MS_ROUND(140, DEFAULT_SERIAL_BAUDS));
     static constexpr uint32_t ROLLCALL_TIMEOUT_MS
       = 333; //(uint32_t)(10 + 5.0 * UART_DURATION_MS_ROUND(sizeof(SwiMuxRespUID_t), DEFAULT_SERIAL_BAUDS));
 

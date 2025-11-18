@@ -165,7 +165,7 @@ void servoMoveMenu(TankManager& tankManager, int numServo)
                 pwm -= BIG_STEP;
                 break;
             case 'c':
-            [[fallthrough]];
+                [[fallthrough]];
             case 'C':
                 pwm = 1500;
                 break;
@@ -286,22 +286,25 @@ static void listenToPort(HardwareSerial& port)
         Serial.read();
 }
 
+static constexpr size_t LOREM_LENGTH = 126;
+static const char LOREM[LOREM_LENGTH]
+  = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua...";
+
 void doWriteTest(TankManager& tankManager, int busIndex)
 {
     busIndex %= NUMBER_OF_BUSES;
-    constexpr size_t LOREM_LENGTH = 126;
+
     SwiMuxResult_e res;
     uint8_t* initial_contents = (uint8_t*)heap_caps_calloc(128, 1, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); // store the initial contents
     char* dest                = (char*)heap_caps_calloc(LOREM_LENGTH, 1, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    const char Lorem[LOREM_LENGTH]
-      = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua...";
-
+    char Lorem[126];
+    strncpy(Lorem, LOREM, 126);
 
 
     Serial.print("Starting write test:\r\n • reading initial content: ");
     res = tankManager.testSwiRead(busIndex, 0, initial_contents, 128);
     if (res != SMREZ_OK) {
-        Serial.println("FAILED !!");
+        Serial.printf("FAILED (err #%d)!!\r\n", res);
         goto EndOfDoWriteTest;
     }
 
@@ -332,8 +335,8 @@ void doWriteTest(TankManager& tankManager, int busIndex)
     {
         for (int iter = 0; iter < 20; iter++) {
             uint16_t address = esp_random() & 127;
-            uint8_t aster = '*';
-            res = tankManager.testSwiWrite(busIndex, address, &aster, 1);
+            uint8_t aster    = '*';
+            res              = tankManager.testSwiWrite(busIndex, address, &aster, 1);
             if (res != SMREZ_OK) {
                 Serial.printf("FAILED with #%d on iter #%d, address %d!!!\r\n", res, iter, address);
                 goto EndOfDoWriteTest;
@@ -501,6 +504,7 @@ void swiMuxMenu(TankManager& tankManager)
                                     Serial.println("\r\nWrite test aborted.");
                                     break;
                                 }
+                                Serial.println();
                                 doWriteTest(tankManager, busIndex);
                                 break;
                             }

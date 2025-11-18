@@ -16,11 +16,13 @@ static const char* TAG = "SwiMuxSerial";
     do {                                                                                                                                             \
         Serial.print(fmt);                                                                                                                           \
     } while (0)
+#define SWI_DBG_FLUSH()               Serial.flush()
 #define SWI_DBGBUFF(TITLE, BUFF, LEN) DebugSerial.print(TITLE, BUFF, LEN)
 #else
 #define SWI_DBGF(fmt, ...)            _NOP()
 #define SWI_DBG(fmt)                  _NOP()
 #define SWI_DBGBUFF(TITLE, BUFF, LEN) _NOP()
+#define SWI_DBG_FLUSH()               _NOP()
 #endif
 
 const char* SwiMuxResultString(SwiMuxResult_e value)
@@ -335,16 +337,32 @@ SwiMuxResult_e SwiMuxSerial_t::read(uint8_t busIndex, uint8_t* bufferOut, uint8_
             SwiMuxError_e res = _codec.decode(received, payload, pLen);
             if (res == SMERR_Done) {
                 SWI_DBGF("[read] payload decoded at %u\r\n", millis());
-                if (pLen < (len + sizeof(SwiMuxCmdRead_t)) && payload != nullptr) {
+                if (pLen <= (len + sizeof(SwiMuxCmdRead_t)) && payload != nullptr) {
+                    SWI_DBGF("Reported `SMCMD_ReadBytes` pLen=%d",pLen);
                     // Check and copy the payload.0
-                    if (payload[0] != (uint8_t)SMCMD_ReadBytes || payload[1] != (0xFF & ~SMCMD_ReadBytes) || payload[2] != cmd.busIndex
+                    if (payload[0] != (uint8_t)SMCMD_ReadBytes || !areNegates(payload[0], payload[1]) || payload[2] != cmd.busIndex
                       || payload[3] != cmd.offset) {
                         // Payload has some unexpected header.
                         ESP_LOGE(TAG, "Unexpected values in read response header.");
                         _isAwake = true;
                         return SMREZ_READ_RESP_ERROR;
                     } else { // payload seems legit
-                        memcpy(bufferOut, &payload[sizeof(SwiMuxCmdRead_t)], payload[4]);
+                        uint8_t reportedLen = payload[4];
+
+                        // Check if the remote device's reported length is valid
+                        if (reportedLen > len) {
+                            ESP_LOGE(TAG, "Read failed: device reported %d bytes, but buffer is only %d bytes", reportedLen, len);
+                            return SMREZ_READ_RESP_ERROR; // Or some other error
+                        }
+                        // Check if the total packet is too small
+                        if (pLen < (sizeof(SwiMuxCmdRead_t) + reportedLen)) {
+                            ESP_LOGE(
+                              TAG, "Read failed: packet truncated. pLen=%d, expected at least %d", pLen, sizeof(SwiMuxCmdRead_t) + reportedLen);
+                            return SMREZ_FRAME_ERROR;
+                        }
+
+                        memcpy(bufferOut, &payload[sizeof(SwiMuxCmdRead_t)], reportedLen);
+
                         _isAwake = true;
                         return SMREZ_OK;
                     }
@@ -367,7 +385,7 @@ SwiMuxResult_e SwiMuxSerial_t::write(uint8_t busIndex, const uint8_t* bufferIn, 
     if (!assertAwake())
         return SwiMuxResult_e::SMREZ_SWIMUX_SILENT;
     // Create a write command.
-    SwiMuxCmdWrite_t* pCmd = (SwiMuxCmdWrite_t*)heap_caps_malloc(sizeof(SwiMuxCmdWrite_t) + (size_t)len, MALLOC_CAP_32BIT);
+    SwiMuxCmdWrite_t* pCmd = (SwiMuxCmdWrite_t*)heap_caps_malloc(sizeof(SwiMuxCmdWrite_t) + (size_t)len, MALLOC_CAP_INTERNAL | MALLOC_CAP_32BIT);
 
     if (pCmd == nullptr) { // allocation failed ?
         ESP_LOGE(
@@ -375,11 +393,26 @@ SwiMuxResult_e SwiMuxSerial_t::write(uint8_t busIndex, const uint8_t* bufferIn, 
         return SMREZ_WRITE_OUTOFMEM;
     }
 
+    // --- START DEBUG ADDITIONS ---
+    Serial.printf("[DEBUG] pCmd after malloc: %p\n", pCmd);
+    Serial.flush();
+    // --- END DEBUG ADDITIONS ---
+
     pCmd->Opcode    = SMCMD_WriteBytes;
     pCmd->NegOpcode = (uint8_t)(0xFF & ~SMCMD_WriteBytes);
     pCmd->busIndex  = (uint8_t)(busIndex % NUMBER_OF_BUSES);
     pCmd->offset    = offset;
     pCmd->length    = len;
+
+    // --- START DEBUG ADDITIONS ---
+    Serial.printf("[DEBUG] pCmd before memcpy: %p\n", pCmd);
+    Serial.printf("[DEBUG] Dest address: %p\n", &pCmd->length + 1);
+    Serial.printf("[DEBUG] Src address: %p\n", bufferIn);
+    Serial.printf("[DEBUG] Src length: %u\n", len);
+    Serial.flush();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    // --- END DEBUG ADDITIONS ---
+
     // Copy into pCmd just after the SwiMuxCmdWrite_t header last byte
     memcpy(&pCmd->length + 1, bufferIn, len);
 
