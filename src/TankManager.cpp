@@ -825,7 +825,24 @@ bool TankManager::testSwiBusUID(uint8_t index, uint64_t& result)
 bool TankManager::testRollCall(RollCallArray_t& results)
 {
 
-    return _swiMux.rollCall(results) == SwiMuxResult_e::SMREZ_OK;
+    SwiMuxResult_e res = _swiMux.rollCall(results);
+    if (res != SwiMuxResult_e::SMREZ_OK) {
+        ESP_LOGD(TAG, "rollCall failed with error %d", res);
+        return false;
+    } else {
+        ESP_LOGD(TAG, "rollCall succeeded with result %d", res);
+    }
+    return true;
+}
+
+SwiMuxResult_e TankManager::testSwiRead(uint8_t busIndex, uint16_t address, uint8_t* dataOut, uint16_t length)
+{
+    return _swiMux.read(busIndex, dataOut, address & 0xFF, length);
+}
+
+SwiMuxResult_e TankManager::testSwiWrite(uint8_t busIndex, uint16_t address, const uint8_t* dataIn, uint16_t length)
+{
+    return _swiMux.write(busIndex, dataIn, address & 0xFF, length);
 }
 
 #pragma endregion

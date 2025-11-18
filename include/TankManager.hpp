@@ -185,13 +185,15 @@ class TankManager {
 #ifdef KIBBLET5_DEBUG_ENABLED
     friend void swiMuxMenu(TankManager& tankManager);
     friend void servoTestMenu(TankManager& tankManager), servoMoveMenu(TankManager& tankManager, int numServo);
+    friend void doWriteTest(TankManager& tankManager, int busIndex);
 
     // Public methods for the hardware test suite
     SwiMuxPresenceReport_t testSwiMuxAwaken();
     bool testSwiMuxSleep(), testSwiBusUID(uint8_t index, uint64_t& result);
     inline HardwareSerial& testGetSwiMuxPort() { return _swiMux.getSerialPort(); }
-    bool testRollCall(RollCallArray_t &results);
-
+    bool testRollCall(RollCallArray_t& results);
+    SwiMuxResult_e testSwiRead(uint8_t busIndex, uint16_t address, uint8_t* dataOut, uint16_t length);
+    SwiMuxResult_e testSwiWrite(uint8_t busIndex, uint16_t address, const uint8_t* dataIn, uint16_t length);
 #endif
     static constexpr uint32_t SWIMUX_POWERUP_DELAY_MS     = 100;
     static constexpr TickType_t MUTEX_ACQUISITION_TIMEOUT = pdMS_TO_TICKS(2000);

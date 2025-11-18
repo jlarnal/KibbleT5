@@ -165,7 +165,7 @@ void servoMoveMenu(TankManager& tankManager, int numServo)
                 pwm -= BIG_STEP;
                 break;
             case 'c':
-            [[fallthrough]]
+            [[fallthrough]];
             case 'C':
                 pwm = 1500;
                 break;
@@ -286,6 +286,84 @@ static void listenToPort(HardwareSerial& port)
         Serial.read();
 }
 
+void doWriteTest(TankManager& tankManager, int busIndex)
+{
+    busIndex %= NUMBER_OF_BUSES;
+    constexpr size_t LOREM_LENGTH = 126;
+    SwiMuxResult_e res;
+    uint8_t* initial_contents = (uint8_t*)heap_caps_calloc(128, 1, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); // store the initial contents
+    char* dest                = (char*)heap_caps_calloc(LOREM_LENGTH, 1, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const char Lorem[LOREM_LENGTH]
+      = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua...";
+
+
+
+    Serial.print("Starting write test:\r\n • reading initial content: ");
+    res = tankManager.testSwiRead(busIndex, 0, initial_contents, 128);
+    if (res != SMREZ_OK) {
+        Serial.println("FAILED !!");
+        goto EndOfDoWriteTest;
+    }
+
+    Serial.print("ok\r\n • writing `Lorem`: ");
+    res = tankManager.testSwiWrite(busIndex, 0, (const uint8_t*)Lorem, LOREM_LENGTH);
+    if (res != SMREZ_OK) {
+        Serial.printf("FAILED (err #%d)!!\r\n", res);
+        goto EndOfDoWriteTest;
+    }
+
+    Serial.print("ok\r\n • first readback: ");
+    res = tankManager.testSwiRead(busIndex, 0, (uint8_t*)dest, LOREM_LENGTH);
+    if (res != SMREZ_OK) {
+        Serial.printf("FAILED (err #%d)!!\r\n", res);
+        goto EndOfDoWriteTest;
+    }
+
+    Serial.print("ok\r\n • comparing written/read: ");
+    {
+        int diffPos = memcmp(Lorem, dest, LOREM_LENGTH);
+        if (diffPos != 0) {
+            Serial.printf("FAILED @ char #%d", diffPos);
+            goto EndOfDoWriteTest;
+        }
+    }
+
+    Serial.print(" • random writes of '*': ");
+    {
+        for (int iter = 0; iter < 20; iter++) {
+            uint16_t address = esp_random() & 127;
+            uint8_t aster = '*';
+            res = tankManager.testSwiWrite(busIndex, address, &aster, 1);
+            if (res != SMREZ_OK) {
+                Serial.printf("FAILED with #%d on iter #%d, address %d!!!\r\n", res, iter, address);
+                goto EndOfDoWriteTest;
+            }
+            Serial.printf(" %d", address);
+        }
+    }
+
+    memset(dest, 0, LOREM_LENGTH);
+    Serial.print("ok\r\n • second readback ");
+    res = tankManager.testSwiRead(busIndex, 0, (uint8_t*)dest, LOREM_LENGTH);
+    if (res != SMREZ_OK) {
+        Serial.printf("FAILED (err #%d)!!\r\n", res);
+        goto EndOfDoWriteTest;
+    }
+    Serial.printf(" • resulting content: %s", dest);
+
+    Serial.print("\r\n • restoring initial content:");
+    res = tankManager.testSwiWrite(busIndex, 0, initial_contents, 128);
+    if (res != SMREZ_OK) {
+        Serial.printf("FAILED with #%d !! INITIAL CONTENT LOST !!\r\n", res);
+        goto EndOfDoWriteTest;
+    }
+    Serial.println("ok");
+EndOfDoWriteTest:
+    free(dest);
+    free(initial_contents);
+    return;
+}
+
 void swiMuxMenu(TankManager& tankManager)
 {
     bool testing = true;
@@ -299,7 +377,8 @@ void swiMuxMenu(TankManager& tankManager)
         Serial.println("4. Put SwiMux to sleep");
         Serial.println("5. Raw serial port access");
         Serial.println("6. Listen to serial port");
-
+        Serial.println("7. Report bytes count in RX buffer");
+        Serial.println("8. Perform Write tests. (DATA WILL BE WIPED)");
         Serial.println("q. Back to Main Menu");
         Serial.print("Enter choice: ");
 
@@ -347,7 +426,7 @@ void swiMuxMenu(TankManager& tankManager)
                     Serial.printf("Scanning SwiMux bus #%d...", busIndex);
                     uint64_t uid;
                     if (tankManager.testSwiBusUID(busIndex, uid)) {
-                        Serial.printf(" uid read %08X%08X\r\n",(int32_t)( uid >> 32), (int32_t)(uid & UINT32_MAX));
+                        Serial.printf(" uid read %08X%08X\r\n", (int32_t)(uid >> 32), (int32_t)(uid & UINT32_MAX));
                     } else {
                         Serial.println("no response.");
                     }
@@ -397,6 +476,37 @@ void swiMuxMenu(TankManager& tankManager)
                 break;
             case '6':
                 listenToPort(tankManager.testGetSwiMuxPort());
+                break;
+            case '7':
+                Serial.printf("Bytes in buffer: %d\r\n\n", tankManager.testGetSwiMuxPort().available());
+                break;
+            case '8':
+                Serial.print("\nWhich bus to write on ? [0-5]:");
+                {
+                    int busIndex = readSerialInt();
+                    if (busIndex < 0 || busIndex > 5) {
+                        Serial.println("\r\nWrong value. Write abored.");
+                        break;
+                    }
+                    Serial.print("Press [W] to start write test, any other key to abort:");
+                    flushSerialInputBuffer();
+                    {
+
+                        int charVal;
+                        do {
+                            charVal = Serial.read();
+                            if (charVal > 0) {
+                                Serial.print((char)charVal);
+                                if (charVal != 'w' && charVal != 'W') {
+                                    Serial.println("\r\nWrite test aborted.");
+                                    break;
+                                }
+                                doWriteTest(tankManager, busIndex);
+                                break;
+                            }
+                        } while (charVal <= 0);
+                    }
+                }
                 break;
             case 'q':
                 [[fallthrough]];

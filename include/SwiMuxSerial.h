@@ -17,6 +17,7 @@ enum SwiMuxResult_e
     SMREZ_WRITE_ENCODE_FAILED,
     SMREZ_WRITE_ACK_MISSING,
     SMREZ_SWIMUX_SILENT,
+    SMREZ_NULL_PARAM,
 };
 
 const char* SwiMuxResultString(SwiMuxResult_e value);
@@ -62,8 +63,8 @@ class SwiMuxSerial_t {
     bool hasEvents(SwiMuxPresenceReport_t* reportOut = NULL);
     SwiMuxPresenceReport_t getPresence(uint32_t timeout_ms = PRESENCE_TIMEOUT_MS);
     SwiMuxResult_e rollCall(RollCallArray_t& uids, uint32_t timeout_ms = ROLLCALL_TIMEOUT_MS);
-    SwiMuxResult_e read(uint8_t busIndex, uint8_t*& bufferOut, uint8_t offset, uint8_t len, uint32_t timeout_ms = READ_TIMEOUT_MS);
-    SwiMuxResult_e write(uint8_t busIndex, uint8_t*& bufferIn, uint8_t offset, uint8_t len, uint32_t timeout_ms = WRITE_TIMEOUT_MS);
+    SwiMuxResult_e read(uint8_t busIndex, uint8_t* bufferOut, uint8_t offset, uint8_t len, uint32_t timeout_ms = READ_TIMEOUT_MS);
+    SwiMuxResult_e write(uint8_t busIndex, const uint8_t* bufferIn, uint8_t offset, uint8_t len, uint32_t timeout_ms = WRITE_TIMEOUT_MS);
     SwiMuxResult_e getUid(uint8_t busIndex, uint64_t& result, uint32_t timeout_ms = GETUID_TIMEOUT_MS);
 
 

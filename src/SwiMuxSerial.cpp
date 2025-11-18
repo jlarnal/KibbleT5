@@ -1,9 +1,11 @@
 #include "SwiMuxSerial.h"
 #include "SerialDebugger.hpp"
 
+//#define DEBUG_SWIMUX
+
 static const char* TAG = "SwiMuxSerial";
 
-#ifdef ARDUINO
+#if defined(DEBUG_SWIMUX) && defined(ARDUINO)
 #include <HardwareSerial.h>
 #define SWI_DBGF(fmt, ...)                                                                                                                           \
     do {                                                                                                                                             \
@@ -15,6 +17,10 @@ static const char* TAG = "SwiMuxSerial";
         Serial.print(fmt);                                                                                                                           \
     } while (0)
 #define SWI_DBGBUFF(TITLE, BUFF, LEN) DebugSerial.print(TITLE, BUFF, LEN)
+#else
+#define SWI_DBGF(fmt, ...)            _NOP()
+#define SWI_DBG(fmt)                  _NOP()
+#define SWI_DBGBUFF(TITLE, BUFF, LEN) _NOP()
 #endif
 
 const char* SwiMuxResultString(SwiMuxResult_e value)
@@ -91,7 +97,7 @@ void SwiMuxSerial_t::begin()
 {
     if (!_beginCalled) {
         _sPort.begin(57600, SerialConfig::SERIAL_8N1, _rxPin, _txPin);
-        ESP_LOGI(TAG, "Serial port initialized.");
+        SWI_DBG("Serial port initialized.");
     }
 }
 
@@ -100,19 +106,33 @@ void SwiMuxSerial_t::begin()
 bool SwiMuxSerial_t::assertAwake(size_t retries)
 {
     uint8_t msg[2] = { SMCMD_Wakeup, (uint8_t)(0xFF & ~SMCMD_Wakeup) };
+    _sPort.flush();
     while (_sPort.available()) {
         _sPort.read();
     }
 
+    bool success;
+    // Wake up and resync
+    _codec.resync([this](uint8_t val) { this->_sPort.write(val); }, [](unsigned long ms) { vTaskDelay(pdMS_TO_TICKS(ms)); }, true);
+
     do {
         _codec.encode(msg, 2, [this](uint8_t value) { this->_sPort.write(((uint8_t)value)); });
         if (_codec.waitForAckTo(
-              SMCMD_Wakeup, millis, [this]() -> int { return this->_sPort.read(); }, [](unsigned long ms) { vTaskDelay(pdMS_TO_TICKS(ms)); }))
-            return true;
-        else
-            Serial.printf("\r\n--> waitForAckTo(%d) failed, %d retries remaining.\r\n", SMCMD_Wakeup, retries - 1);
+              SMCMD_Wakeup, millis, [this]() -> int { return this->_sPort.read(); }, [](unsigned long ms) { vTaskDelay(pdMS_TO_TICKS(ms)); })) {
+            success = true;
+            break;
+        } else {
+            success = false;
+            SWI_DBGF("\r\n--> waitForAckTo(%d) failed, %d retries remaining.\r\n", SMCMD_Wakeup, retries - 1);
+        }
     } while (--retries);
-    return false;
+    // Wait for any other message to arrive
+    vTaskDelay(pdMS_TO_TICKS(20));
+    while (_sPort.available()) {
+        _sPort.read();
+    }
+
+    return success;
 }
 
 bool SwiMuxSerial_t::sleep()
@@ -155,8 +175,6 @@ SwiMuxPresenceReport_t SwiMuxSerial_t::getPresence(uint32_t timeout_ms)
 
 SwiMuxPresenceReport_t SwiMuxSerial_t::_pollPresencePacket(uint32_t timeout_ms)
 {
-    if (!assertAwake())
-        return SwiMuxPresenceReport_t();
     uint8_t* payload              = nullptr;
     size_t pLen                   = 0;
     uint32_t startTime            = millis();
@@ -274,6 +292,8 @@ SwiMuxResult_e SwiMuxSerial_t::rollCall(RollCallArray_t& uidsList, uint32_t time
                         _isAwake = true;
                         return SMREZ_OK;
                     } else { // We got a paylod, but not the expected one.
+                        SWI_DBGF("[rollCall] payload invalid (payLoad=%p, pLen=%d) !\r\n", payload, pLen);
+                        SWI_DBGBUFF("contents:", payload, pLen);
                         return SMREZ_INVALID_PAYLOAD;
                     }
 
@@ -290,8 +310,10 @@ SwiMuxResult_e SwiMuxSerial_t::rollCall(RollCallArray_t& uidsList, uint32_t time
 }
 
 
-SwiMuxResult_e SwiMuxSerial_t::read(uint8_t busIndex, uint8_t*& bufferOut, uint8_t offset, uint8_t len, uint32_t timeout_ms)
+SwiMuxResult_e SwiMuxSerial_t::read(uint8_t busIndex, uint8_t* bufferOut, uint8_t offset, uint8_t len, uint32_t timeout_ms)
 {
+    if (bufferOut == nullptr)
+        return SMREZ_NULL_PARAM;
     if (!assertAwake())
         return SwiMuxResult_e::SMREZ_SWIMUX_SILENT;
     // Start by sending the read request.
@@ -338,12 +360,14 @@ SwiMuxResult_e SwiMuxSerial_t::read(uint8_t busIndex, uint8_t*& bufferOut, uint8
 }
 
 
-SwiMuxResult_e SwiMuxSerial_t::write(uint8_t busIndex, uint8_t*& bufferIn, uint8_t offset, uint8_t len, uint32_t timeout_ms)
+SwiMuxResult_e SwiMuxSerial_t::write(uint8_t busIndex, const uint8_t* bufferIn, uint8_t offset, uint8_t len, uint32_t timeout_ms)
 {
+    if (bufferIn == nullptr)
+        return SMREZ_NULL_PARAM;
     if (!assertAwake())
         return SwiMuxResult_e::SMREZ_SWIMUX_SILENT;
     // Create a write command.
-    SwiMuxCmdWrite_t* pCmd = (SwiMuxCmdWrite_t*)heap_caps_aligned_alloc(4, sizeof(SwiMuxCmdWrite_t) + (size_t)len, MALLOC_CAP_INTERNAL);
+    SwiMuxCmdWrite_t* pCmd = (SwiMuxCmdWrite_t*)heap_caps_malloc(sizeof(SwiMuxCmdWrite_t) + (size_t)len, MALLOC_CAP_32BIT);
 
     if (pCmd == nullptr) { // allocation failed ?
         ESP_LOGE(
@@ -353,11 +377,11 @@ SwiMuxResult_e SwiMuxSerial_t::write(uint8_t busIndex, uint8_t*& bufferIn, uint8
 
     pCmd->Opcode    = SMCMD_WriteBytes;
     pCmd->NegOpcode = (uint8_t)(0xFF & ~SMCMD_WriteBytes);
-    pCmd->busIndex  = (uint8_t)(busIndex % 6);
+    pCmd->busIndex  = (uint8_t)(busIndex % NUMBER_OF_BUSES);
     pCmd->offset    = offset;
     pCmd->length    = len;
     // Copy into pCmd just after the SwiMuxCmdWrite_t header last byte
-    memcpy((void*)&((uint8_t*)(void*)pCmd)[sizeof(SwiMuxCmdWrite_t)], bufferIn, len);
+    memcpy(&pCmd->length + 1, bufferIn, len);
 
     SwiMuxResult_e result = SMREZ_WRITE_ENCODE_FAILED;
     if (_codec.encode((const uint8_t*)(void*)pCmd, sizeof(SwiMuxCmdWrite_t) + (size_t)len, [this](uint8_t wrtVal) { this->_sPort.write(wrtVal); })) {
@@ -369,5 +393,6 @@ SwiMuxResult_e SwiMuxSerial_t::write(uint8_t busIndex, uint8_t*& bufferIn, uint8
             result = SMREZ_TIMED_OUT;
         }
     }
+    heap_caps_free(pCmd);
     return result;
 }
