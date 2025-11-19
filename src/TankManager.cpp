@@ -261,8 +261,8 @@ TankInfo::TankInfoDiscrepancies_e TankInfo::toTankData(TankEEpromData_t& eeprom)
     if (name.compare(0, sizeof(TankEEpromData_t::_RECORD_::name), (char*)&eeprom.records[0].name[0]) != 0) {
         result |= TID_NAME_CHANGED;
         // Copy the length-capped name string.
-        eeprom.records[0].nameLength = name.length() % (sizeof(TankEEpromData_t::_RECORD_::name) + 1);
-        strncpy((char*)&eeprom.records[0].name[0], name.c_str(), (size_t)eeprom.records[0].nameLength);
+        eeprom.records[0].nameLength = std::min(name.length() , (size_t)sizeof(TankEEpromData_t::_RECORD_::name));
+        strncpy((char*)&eeprom.records[0].name[0], name.c_str(), (size_t)eeprom.records[0].nameLength-1);
     }
     // bus index
     if (busIndex != eeprom.records[0].history.lastBusIndex) {

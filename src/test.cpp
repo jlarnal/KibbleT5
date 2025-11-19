@@ -8,6 +8,7 @@
 #include "esp_log.h"
 //#include <hal/gpio_ll.h>
 #include <hal/gpio_hal.h>
+#include "SerialDebugger.hpp"
 
 
 static const char* TAG = "DebugTest";
@@ -286,6 +287,22 @@ static void listenToPort(HardwareSerial& port)
         Serial.read();
 }
 
+static int findDiff(const void* pA, const void* pB, size_t length)
+{
+    if (pA == nullptr && pB == nullptr)
+        return -3;
+    else if (pA == nullptr)
+        return -1;
+    else if (pB == nullptr)
+        return -2;
+    uint8_t *b1 = (uint8_t*)pA, *b2 = (uint8_t*)pB;
+    for (int index = 0; index < length; index++) {
+        if (*b1++ != *b2++)
+            return index;
+    }
+    return length;
+}
+
 static constexpr size_t LOREM_LENGTH = 126;
 static const char LOREM[LOREM_LENGTH]
   = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua...";
@@ -295,8 +312,8 @@ void doWriteTest(TankManager& tankManager, int busIndex)
     busIndex %= NUMBER_OF_BUSES;
 
     SwiMuxResult_e res;
-    uint8_t* initial_contents = (uint8_t*)heap_caps_calloc(128, 1, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); // store the initial contents
-    char* dest                = (char*)heap_caps_calloc(LOREM_LENGTH, 1, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint8_t* initial_contents = (uint8_t*)calloc(128, 1); // store the initial contents
+    char* dest                = (char*)calloc(LOREM_LENGTH, 1);
     char Lorem[126];
     strncpy(Lorem, LOREM, 126);
 
@@ -314,8 +331,17 @@ void doWriteTest(TankManager& tankManager, int busIndex)
         Serial.printf("FAILED (err #%d)!!\r\n", res);
         goto EndOfDoWriteTest;
     }
+    Serial.print("ok\r\n • checking write buffer for writebacks: ");
+    {
+        int diffPos = memcmp(LOREM, Lorem, LOREM_LENGTH);
+        if (diffPos) {
+            Serial.printf("FAILED !! Diff occurs @ char %d\r\n", diffPos);
+            DebugSerial.print("Input buffer", Lorem, LOREM_LENGTH, 16, 16, false, false, nullptr);
+            goto EndOfDoWriteTest;
+        }
+    }
 
-    Serial.print("ok\r\n • first readback: ");
+    Serial.print("ok (none)\r\n • first readback from mem: ");
     res = tankManager.testSwiRead(busIndex, 0, (uint8_t*)dest, LOREM_LENGTH);
     if (res != SMREZ_OK) {
         Serial.printf("FAILED (err #%d)!!\r\n", res);
@@ -324,9 +350,16 @@ void doWriteTest(TankManager& tankManager, int busIndex)
 
     Serial.print("ok\r\n • comparing written/read: ");
     {
-        int diffPos = memcmp(Lorem, dest, LOREM_LENGTH);
-        if (diffPos != 0) {
-            Serial.printf("FAILED @ char #%d", diffPos);
+        int diffPos = findDiff(Lorem, dest, LOREM_LENGTH);
+        if (diffPos < 0) {
+            Serial.printf("FAILED !! %s null\r\n", (diffPos == -1 ? "Lorem was" : (diffPos == -2 ? "dest was" : "both strings were")));
+        } else if (diffPos < LOREM_LENGTH) {
+            Serial.printf("FAILED @ char #%d\r\n", diffPos);
+            Serial.flush();
+            Serial.printf("Content: \"%s\"\r\n", (char*)dest);
+            Serial.flush();
+            DebugSerial.print("Raw: ", dest, 128);
+            Serial.println();
             goto EndOfDoWriteTest;
         }
     }
@@ -364,6 +397,7 @@ void doWriteTest(TankManager& tankManager, int busIndex)
 EndOfDoWriteTest:
     free(dest);
     free(initial_contents);
+    Serial.println();
     return;
 }
 

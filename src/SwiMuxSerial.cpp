@@ -338,7 +338,8 @@ SwiMuxResult_e SwiMuxSerial_t::read(uint8_t busIndex, uint8_t* bufferOut, uint8_
             if (res == SMERR_Done) {
                 SWI_DBGF("[read] payload decoded at %u\r\n", millis());
                 if (pLen <= (len + sizeof(SwiMuxCmdRead_t)) && payload != nullptr) {
-                    SWI_DBGF("Reported `SMCMD_ReadBytes` pLen=%d",pLen);
+                    SWI_DBGF("Reported `SMCMD_ReadBytes` pLen=%d, reportedLen=%d",pLen, payload[4]);
+
                     // Check and copy the payload.0
                     if (payload[0] != (uint8_t)SMCMD_ReadBytes || !areNegates(payload[0], payload[1]) || payload[2] != cmd.busIndex
                       || payload[3] != cmd.offset) {
@@ -385,7 +386,7 @@ SwiMuxResult_e SwiMuxSerial_t::write(uint8_t busIndex, const uint8_t* bufferIn, 
     if (!assertAwake())
         return SwiMuxResult_e::SMREZ_SWIMUX_SILENT;
     // Create a write command.
-    SwiMuxCmdWrite_t* pCmd = (SwiMuxCmdWrite_t*)heap_caps_malloc(sizeof(SwiMuxCmdWrite_t) + (size_t)len, MALLOC_CAP_INTERNAL | MALLOC_CAP_32BIT);
+    SwiMuxCmdWrite_t* pCmd = (SwiMuxCmdWrite_t*)malloc(sizeof(SwiMuxCmdWrite_t) + (size_t)len);
 
     if (pCmd == nullptr) { // allocation failed ?
         ESP_LOGE(
@@ -426,6 +427,6 @@ SwiMuxResult_e SwiMuxSerial_t::write(uint8_t busIndex, const uint8_t* bufferIn, 
             result = SMREZ_TIMED_OUT;
         }
     }
-    heap_caps_free(pCmd);
+    free(pCmd);
     return result;
 }

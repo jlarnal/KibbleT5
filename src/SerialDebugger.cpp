@@ -3,7 +3,8 @@
 
 SerialDebugger_t DebugSerial(Serial);
 
-void SerialDebugger_t::print(const char* title, void* buffer, size_t len, int columns, uint8_t radix, bool linesHeaders)
+void SerialDebugger_t::print(
+  const char* title, void* buffer, size_t len, int columns, uint8_t radix, bool linesHeaders, bool addPrefixes, const char* sepString)
 {
     if (title)
         _out.print(title);
@@ -17,6 +18,7 @@ void SerialDebugger_t::print(const char* title, void* buffer, size_t len, int co
         std::function<void(uint8_t)> printVal;
         switch (radix) {
             case 2:
+
                 printVal = [this](uint8_t val) { this->_out.print(val, 2); };
                 break;
             case 8:
@@ -28,7 +30,10 @@ void SerialDebugger_t::print(const char* title, void* buffer, size_t len, int co
             case 16:
             [[fallthrough]]
             default:
-                printVal = [this](uint8_t val) { this->_out.printf("0x%02x", val); };
+                if (addPrefixes)
+                    printVal = [this](uint8_t val) { this->_out.printf("0x%02x", val); };
+                else
+                    printVal = [this](uint8_t val) { this->_out.printf("%02x", val); };
         }
 
         std::function<void(size_t)> printLineHeader;
@@ -44,8 +49,8 @@ void SerialDebugger_t::print(const char* title, void* buffer, size_t len, int co
             if (!colCount)
                 printLineHeader(lineIndex++);
             printVal(*pByte++);
-            if (len > 1)
-                _out.print(",");
+            if (sepString != nullptr && len > 1)
+                _out.print(sepString);
 
 
             if (++colCount == columns) {
