@@ -303,6 +303,33 @@ static int findDiff(const void* pA, const void* pB, size_t length)
     return length;
 }
 
+void doReadTest(TankManager& tankManager, int busIndex)
+{
+    busIndex %= NUMBER_OF_BUSES;
+    uint8_t* buff = (uint8_t*)malloc(128);
+    if (!buff) {
+        Serial.println("\r\nERROR: Could not allocate 128 bytes in internal RAM for the read buffer.");
+        return;
+    }
+    memset(buff, 0, 128);
+    Serial.printf("\r\nAttempting to read 128 bytes from offset 0 on device #%d...", busIndex);
+    uint32_t endTime, startTime;
+    startTime                = micros();
+    SwiMuxSerialResult_e res = tankManager.testSwiRead(busIndex, 0, buff, 128);
+    endTime                  = micros();
+    if (res != SwiMuxSerialResult_e::SMREZ_OK) {
+        Serial.printf("FAILED !!!\r\nRead error: %d\r\n", SwiMuxSerial_t::getResultValueName(res));
+    } else {
+        Serial.println("success");
+    }
+    Serial.printf("Read operation took %9.3f milliseconds.\r\n", (double)(endTime - startTime) * 1E-3);
+    DebugSerial.print("Read buffer contents (ASCII):\r\n", buff, 128, 16, 'a', false, false, nullptr);
+    DebugSerial.print("Read buffer contents (HEX):\r\n", buff, 128, 8, 16);
+
+    if (buff)
+        free(buff);
+}
+
 static constexpr size_t LOREM_LENGTH = 126;
 static const char LOREM[LOREM_LENGTH]
   = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua...";
@@ -310,8 +337,9 @@ static const char LOREM[LOREM_LENGTH]
 void doWriteTest(TankManager& tankManager, int busIndex)
 {
     busIndex %= NUMBER_OF_BUSES;
+    uint32_t startTime, endTime;
 
-    SwiMuxResult_e res;
+    SwiMuxSerialResult_e res;
     uint8_t* initial_contents = (uint8_t*)calloc(128, 1); // store the initial contents
     char* dest                = (char*)calloc(LOREM_LENGTH, 1);
     char Lorem[126];
@@ -321,17 +349,21 @@ void doWriteTest(TankManager& tankManager, int busIndex)
     Serial.print("Starting write test:\r\n • reading initial content: ");
     res = tankManager.testSwiRead(busIndex, 0, initial_contents, 128);
     if (res != SMREZ_OK) {
-        Serial.printf("FAILED (err #%d)!!\r\n", res);
+        Serial.printf("FAILED (%s)!!\r\n", SwiMuxSerial_t::getResultValueName(res));
         goto EndOfDoWriteTest;
     }
+    Serial.println("ok\r\n");
+    DebugSerial.print("Initial content:\r\n", initial_contents, 128, 0, 'a', false, false, "");
 
-    Serial.print("ok\r\n • writing `Lorem`: ");
-    res = tankManager.testSwiWrite(busIndex, 0, (const uint8_t*)Lorem, LOREM_LENGTH);
+    Serial.print(" • writing `Lorem`: ");
+    startTime = micros();
+    res       = tankManager.testSwiWrite(busIndex, 0, (const uint8_t*)Lorem, LOREM_LENGTH);
+    endTime   = micros();
     if (res != SMREZ_OK) {
-        Serial.printf("FAILED (err #%d)!!\r\n", res);
+        Serial.printf("FAILED (%s)!!\r\n", SwiMuxSerial_t::getResultValueName(res));
         goto EndOfDoWriteTest;
     }
-    Serial.print("ok\r\n • checking write buffer for writebacks: ");
+    Serial.printf("ok (%9.3fms)\r\n • checking write buffer for writebacks: ", (double)(endTime - startTime) * 1E-3);
     {
         int diffPos = memcmp(LOREM, Lorem, LOREM_LENGTH);
         if (diffPos) {
@@ -344,7 +376,7 @@ void doWriteTest(TankManager& tankManager, int busIndex)
     Serial.print("ok (none)\r\n • first readback from mem: ");
     res = tankManager.testSwiRead(busIndex, 0, (uint8_t*)dest, LOREM_LENGTH);
     if (res != SMREZ_OK) {
-        Serial.printf("FAILED (err #%d)!!\r\n", res);
+        Serial.printf("FAILED (%s)!!\r\n", SwiMuxSerial_t::getResultValueName(res));
         goto EndOfDoWriteTest;
     }
 
@@ -364,36 +396,46 @@ void doWriteTest(TankManager& tankManager, int busIndex)
         }
     }
 
-    Serial.print(" • random writes of '*': ");
+    Serial.print("ok\r\n • random writes of '*': (press any key to proceed)\r\n");
+    DebugSerial.readKey(true);
     {
-        for (int iter = 0; iter < 20; iter++) {
-            uint16_t address = esp_random() & 127;
-            uint8_t aster    = '*';
-            res              = tankManager.testSwiWrite(busIndex, address, &aster, 1);
+        constexpr int RANDWRITES_ITERS_COUNT = 20;
+        uint8_t aster                        = '*';
+        uint16_t address                     = esp_random() % (127 - RANDWRITES_ITERS_COUNT);
+        int64_t totTime                      = 0LL;
+        for (int iter = 0; iter < RANDWRITES_ITERS_COUNT; iter++, address++) {
+            startTime = micros();
+            res       = tankManager.testSwiWrite(busIndex, address, &aster, 1);
+            endTime   = micros();
+            totTime += endTime - startTime;
             if (res != SMREZ_OK) {
-                Serial.printf("FAILED with #%d on iter #%d, address %d!!!\r\n", res, iter, address);
-                goto EndOfDoWriteTest;
+                Serial.printf("FAILED to write at offset 0x%02x on iter #%d (err #%d, \"%s\") !\r\n", address, iter, res,
+                  SwiMuxSerial_t::getResultValueName(res));
+            } else {
+                Serial.printf("successfully wrote at address %d in %9.3fms\r\n", address, (double)(endTime - startTime) * 1E-3);
             }
-            Serial.printf(" %d", address);
         }
+        Serial.printf("Average write delay: %9.3f milliseconds.\r\n", ((double)totTime * 1E-3) / (double)RANDWRITES_ITERS_COUNT);
     }
 
     memset(dest, 0, LOREM_LENGTH);
-    Serial.print("ok\r\n • second readback ");
+    Serial.print("Done\r\n • second readback ");
     res = tankManager.testSwiRead(busIndex, 0, (uint8_t*)dest, LOREM_LENGTH);
     if (res != SMREZ_OK) {
-        Serial.printf("FAILED (err #%d)!!\r\n", res);
+        Serial.printf("FAILED (%s)!!\r\n", SwiMuxSerial_t::getResultValueName(res));
         goto EndOfDoWriteTest;
     }
     Serial.printf(" • resulting content: %s", dest);
 
+    /*
     Serial.print("\r\n • restoring initial content:");
     res = tankManager.testSwiWrite(busIndex, 0, initial_contents, 128);
     if (res != SMREZ_OK) {
-        Serial.printf("FAILED with #%d !! INITIAL CONTENT LOST !!\r\n", res);
+        Serial.printf("FAILED (%s) !! INITIAL CONTENT LOST !!\r\n", SwiMuxSerial_t::getResultValueName(res));
         goto EndOfDoWriteTest;
     }
     Serial.println("ok");
+    */
 EndOfDoWriteTest:
     free(dest);
     free(initial_contents);
@@ -415,8 +457,9 @@ void swiMuxMenu(TankManager& tankManager)
         Serial.println("5. Raw serial port access");
         Serial.println("6. Listen to serial port");
         Serial.println("7. Report bytes count in RX buffer");
-        Serial.println("8. Perform Write tests. (DATA WILL BE WIPED)");
-        Serial.println("q. Back to Main Menu");
+        Serial.println("8. Perform read test.");
+        Serial.println("9. Perform Write tests. (DATA WILL BE WIPED)");
+        Serial.println("Q. Back to Main Menu");
         Serial.print("Enter choice: ");
 
         flushSerialInputBuffer();
@@ -518,10 +561,22 @@ void swiMuxMenu(TankManager& tankManager)
                 Serial.printf("Bytes in buffer: %d\r\n\n", tankManager.testGetSwiMuxPort().available());
                 break;
             case '8':
+                Serial.print("\nWhich bus to read from ? [0-5]:");
+                {
+                    int busIndex = readSerialInt();
+                    if (busIndex < 0 || busIndex > NUMBER_OF_BUSES) {
+                        Serial.println("\r\nWrong value. Read abored.");
+                        break;
+                    }
+                    flushSerialInputBuffer();
+                    doReadTest(tankManager, busIndex);
+                }
+                break;
+            case '9':
                 Serial.print("\nWhich bus to write on ? [0-5]:");
                 {
                     int busIndex = readSerialInt();
-                    if (busIndex < 0 || busIndex > 5) {
+                    if (busIndex < 0 || busIndex > NUMBER_OF_BUSES) {
                         Serial.println("\r\nWrong value. Write abored.");
                         break;
                     }
@@ -750,4 +805,4 @@ void doDebugTest(TankManager& tankManager, HX711Scale& scale)
     }
 }
 
-#endif
+#endif // defined(KIBBLET5_DEBUG_ENABLED)

@@ -25,32 +25,115 @@ static const char* TAG = "SwiMuxSerial";
 #define SWI_DBG_FLUSH()               _NOP()
 #endif
 
-const char* SwiMuxResultString(SwiMuxResult_e value)
+const char* SwiMuxSerial_t::getResultValueName(const SwiMuxSerialResult_e value)
 {
     switch (value) {
-        case SMREZ_OK:
+        case SwiMuxSerialResult_e::SMREZ_OK:
             return "SMREZ_OK";
-        case SMREZ_FRAME_ERROR:
-            return "SMREZ_FRAME_ERROR";
-        case SMREZ_INVALID_PAYLOAD:
+        case SwiMuxSerialResult_e::SMREZ_INVALID_PAYLOAD:
             return "SMREZ_INVALID_PAYLOAD";
-        case SMREZ_BUS_INDEX_OUT_OF_RANGE:
+        case SwiMuxSerialResult_e::SMREZ_BUS_INDEX_OUT_OF_RANGE:
             return "SMREZ_BUS_INDEX_OUT_OF_RANGE";
-        case SMREZ_NO_DEVICE:
+        case SwiMuxSerialResult_e::SMREZ_NO_DEVICE:
             return "SMREZ_NO_DEVICE";
-        case SMREZ_TIMED_OUT:
+        case SwiMuxSerialResult_e::SMREZ_TIMED_OUT:
             return "SMREZ_TIMED_OUT";
-        case SMREZ_READ_RESP_ERROR:
+        case SwiMuxSerialResult_e::SMREZ_READ_RESP_ERROR:
             return "SMREZ_READ_RESP_ERROR";
-        case SMREZ_WRITE_OUTOFMEM:
+        case SwiMuxSerialResult_e::SMREZ_WRITE_OUTOFMEM:
             return "SMREZ_WRITE_OUTOFMEM";
-        case SMREZ_WRITE_ENCODE_FAILED:
+        case SwiMuxSerialResult_e::SMREZ_WRITE_ENCODE_FAILED:
             return "SMREZ_WRITE_ENCODE_FAILED";
-        case SMREZ_WRITE_ACK_MISSING:
+        case SwiMuxSerialResult_e::SMREZ_WRITE_ACK_MISSING:
             return "SMREZ_WRITE_ACK_MISSING";
+        case SwiMuxSerialResult_e::SMREZ_SWIMUX_SILENT:
+            return "SMREZ_SWIMUX_SILENT";
+        case SwiMuxSerialResult_e::SMREZ_NULL_PARAM:
+            return "SMREZ_NULL_PARAM";
+        case SwiMuxSerialResult_e::SMREZ_OW_DIO_PORT_NULL:
+            return "SMREZ_OW_DIO_PORT_NULL";
+        case SwiMuxSerialResult_e::SMREZ_OW_DIO_PORT_INVALID:
+            return "SMREZ_OW_DIO_PORT_INVALID";
+        case SwiMuxSerialResult_e::SMREZ_OW_DIO_PIN_INVALID:
+            return "SMREZ_OW_DIO_PIN_INVALID";
+        case SwiMuxSerialResult_e::SMREZ_OW_PULLUP_PORT_INVALID:
+            return "SMREZ_OW_PULLUP_PORT_INVALID";
+        case SwiMuxSerialResult_e::SMREZ_OW_PULLUP_PIN_INVALID:
+            return "SMREZ_OW_PULLUP_PIN_INVALID";
+        case SwiMuxSerialResult_e::SMREZ_OW_NULL_INPUT_BUFFER:
+            return "SMREZ_OW_NULL_INPUT_BUFFER";
+        case SwiMuxSerialResult_e::SMREZ_OW_NULL_OUTPUT_BUFFER:
+            return "SMREZ_OW_NULL_OUTPUT_BUFFER";
+        case SwiMuxSerialResult_e::SMREZ_OW_NO_BUS_POWER:
+            return "SMREZ_OW_NO_BUS_POWER";
+        case SwiMuxSerialResult_e::SMREZ_OW_BUS_HELD_LOW:
+            return "SMREZ_OW_BUS_HELD_LOW";
+        case SwiMuxSerialResult_e::SMREZ_OW_NO_DEVICE_PRESENT:
+            return "SMREZ_OW_NO_DEVICE_PRESENT";
+        case SwiMuxSerialResult_e::SMREZ_OW_READ_ROM_FAILED:
+            return "SMREZ_OW_READ_ROM_FAILED";
+        case SwiMuxSerialResult_e::SMREZ_OW_ALIGNED_WRITE_HEAD_PREREAD:
+            return "SMREZ_OW_ALIGNED_WRITE_HEAD_PREREAD";
+        case SwiMuxSerialResult_e::SMREZ_OW_ALIGNED_WRITE_TAIL_PREREAD:
+            return "SMREZ_OW_ALIGNED_WRITE_TAIL_PREREAD";
+        case SwiMuxSerialResult_e::SMREZ_OW_MEMADDRESS_OUT_OF_BOUNDS:
+            return "SMREZ_OW_MEMADDRESS_OUT_OF_BOUNDS";
+        case SwiMuxSerialResult_e::SMREZ_OW_OUT_OF_BOUNDS:
+            return "SMREZ_OW_OUT_OF_BOUNDS";
+        case SwiMuxSerialResult_e::SMREZ_OW_WRITE_MEM_FAILED:
+            return "SMREZ_OW_WRITE_MEM_FAILED";
+        case SwiMuxSerialResult_e::SMREZ_OW_MULTIDROP_ID_UNREADABLE:
+            return "SMREZ_OW_MULTIDROP_ID_UNREADABLE";
+        case SwiMuxSerialResult_e::SMREZ_OW_WRITE_SCRATCHPAD_PRESELECT:
+            return "SMREZ_OW_WRITE_SCRATCHPAD_PRESELECT";
+        case SwiMuxSerialResult_e::SMREZ_OW_WRITE_SCRATCHPAD_CRC16:
+            return "SMREZ_OW_WRITE_SCRATCHPAD_CRC16";
+        case SwiMuxSerialResult_e::SMREZ_OW_READ_SCRATCHPAD_PRESELECT:
+            return "SMREZ_OW_READ_SCRATCHPAD_PRESELECT";
+        case SwiMuxSerialResult_e::SMREZ_OW_READ_SCRATCHPAD_CRC16:
+            return "SMREZ_OW_READ_SCRATCHPAD_CRC16";
+        case SwiMuxSerialResult_e::SMREZ_OW_SCRATCHPAD_PF:
+            return "SMREZ_OW_SCRATCHPAD_PF";
+        case SwiMuxSerialResult_e::SMREZ_OW_WRITTEN_SCRATCHPAD_MISMATCH:
+            return "SMREZ_OW_WRITTEN_SCRATCHPAD_MISMATCH";
+        case SwiMuxSerialResult_e::SMREZ_OW_COPY_SCRATCHPAD_PRESELECT:
+            return "SMREZ_OW_COPY_SCRATCHPAD_PRESELECT";
+        case SwiMuxSerialResult_e::SMREZ_OW_COPY_SCRATCHPAD:
+            return "SMREZ_OW_COPY_SCRATCHPAD";
+        case SwiMuxSerialResult_e::SMREZ_UnkownCommand:
+            return "SMREZ_UnkownCommand";
+        case SwiMuxSerialResult_e::SMREZ_Framing:
+            return "SMREZ_Framing";
+        case SwiMuxSerialResult_e::SMREZ_WrongEscape:
+            return "SMREZ_WrongEscape";
+        case SwiMuxSerialResult_e::SMREZ_ReadBytesParams:
+            return "SMREZ_ReadBytesParams";
+        case SwiMuxSerialResult_e::SMREZ_BusIndexOutOfRange:
+            return "SMREZ_BusIndexOutOfRange";
+        case SwiMuxSerialResult_e::SMREZ_MemOffsetOutOfRange:
+            return "SMREZ_MemOffsetOutOfRange";
+        case SwiMuxSerialResult_e::SMREZ_ReadLengthOutOfRange:
+            return "SMREZ_ReadLengthOutOfRange";
+        case SwiMuxSerialResult_e::SMREZ_ReadMemoryFailed:
+            return "SMREZ_ReadMemoryFailed";
+        case SwiMuxSerialResult_e::SMREZ_ResponseEncodingFailed:
+            return "SMREZ_ResponseEncodingFailed";
+        case SwiMuxSerialResult_e::SMREZ_WriteLengthOutOfRange:
+            return "SMREZ_WriteLengthOutOfRange";
+        case SwiMuxSerialResult_e::SMREZ_WriteFailed:
+            return "SMREZ_WriteFailed";
+        case SwiMuxSerialResult_e::SMREZ_GuidUnreadable:
+            return "SMREZ_GuidUnreadable";
+        case SwiMuxSerialResult_e::SMREZ_BadCrc:
+            return "SMREZ_BadCrc";
+        case SwiMuxSerialResult_e::SMREZ_BADFUNCALL:
+            return "SMREZ_BADFUNCALL";
+        case SwiMuxSerialResult_e::SMREZ_CommandDisabled:
+            return "SMREZ_CommandDisabled";
         default:
-            return "UNDEFINED";
+            break;
     }
+    return "<undefined>";
 }
 
 
@@ -124,7 +207,8 @@ bool SwiMuxSerial_t::assertAwake(size_t retries)
             success = true;
             break;
         } else {
-            success = false;
+            _lastResult = SMREZ_NO_DEVICE;
+            success     = false;
             SWI_DBGF("\r\n--> waitForAckTo(%d) failed, %d retries remaining.\r\n", SMCMD_Wakeup, retries - 1);
         }
     } while (--retries);
@@ -140,9 +224,10 @@ bool SwiMuxSerial_t::assertAwake(size_t retries)
 bool SwiMuxSerial_t::sleep()
 {
     _codec.encode(SwiMuxRequest_Sleep, sizeof(SwiMuxRequest_Sleep), [this](uint8_t value) { this->_sPort.write(((uint8_t)value)); });
-    _isAwake = false;
-    return _codec.waitForAckTo(
+    _isAwake    = false;
+    _lastResult = (SwiMuxSerialResult_e)_codec.waitForAckTo(
       SwiMuxOpcodes_e::SMCMD_Sleep, millis, [this]() -> int { return this->_sPort.read(); }, [](unsigned long ms) { vTaskDelay(pdMS_TO_TICKS(ms)); });
+    return _lastResult == SMREZ_OK;
 }
 
 bool SwiMuxSerial_t::hasEvents(SwiMuxPresenceReport_t* reportOut)
@@ -196,16 +281,20 @@ SwiMuxPresenceReport_t SwiMuxSerial_t::_pollPresencePacket(uint32_t timeout_ms)
                     SWI_DBGBUFF("(SwiMuxCmdPresence_t):", (void*)payload, pLen);
                 }
 
-                if (pLen == sizeof(SwiMuxCmdPresence_t) && payload != nullptr && payload[0] == SMCMD_GetPresence
-                  && areNegates(payload[0], payload[1])) {
-                    ESP_LOGI(TAG, "_pollPresencePacket: Received payload of %d bytes\r\n", pLen);
-                    SwiMuxCmdPresence_t resp;
-                    memcpy(&resp, payload, sizeof(SwiMuxCmdPresence_t));
-                    result.busesCount = resp.busesCount;
-                    result.presences  = (((uint16_t)resp.presenceMSB) << 8) | resp.presenceLSB;
-                    return result;
+                if (pLen == sizeof(SwiMuxCmdPresence_t) && payload != nullptr && areNegates(payload[0], payload[1])) {
+                    if (payload[0] == SMCMD_GetPresence) {
+                        ESP_LOGI(TAG, "_pollPresencePacket: Received payload of %d bytes\r\n", pLen);
+                        SwiMuxCmdPresence_t resp;
+                        memcpy(&resp, payload, sizeof(SwiMuxCmdPresence_t));
+                        result.busesCount = resp.busesCount;
+                        result.presences  = (((uint16_t)resp.presenceMSB) << 8) | resp.presenceLSB;
+                        return result;
+                    } else if (payload[0] == SMCMD_Nack) {
+                        _lastResult = (SwiMuxSerialResult_e)payload[2];
+                    }
                 }
             } else if (res != SMERR_Ok) {
+                _lastResult = (SwiMuxSerialResult_e)res;
                 ESP_LOGW(TAG, "_pollPresencePacket: Failed to retreive presence report (err #%d)", res);
                 return result;
             }
@@ -219,10 +308,10 @@ SwiMuxPresenceReport_t SwiMuxSerial_t::_pollPresencePacket(uint32_t timeout_ms)
 }
 
 
-SwiMuxResult_e SwiMuxSerial_t::getUid(uint8_t busIndex, uint64_t& uid, uint32_t timeout_ms)
+SwiMuxSerialResult_e SwiMuxSerial_t::getUid(uint8_t busIndex, uint64_t& uid, uint32_t timeout_ms)
 {
     if (!assertAwake())
-        return SwiMuxResult_e::SMREZ_SWIMUX_SILENT;
+        return SwiMuxSerialResult_e::SMREZ_SWIMUX_SILENT;
 
     SwiMuxGetUID_t getUidCmd = SwiMuxGetUID_t((uint8_t)(busIndex % 6));
     _codec.encode((uint8_t*)&getUidCmd, sizeof(getUidCmd), [this](uint8_t value) { this->_sPort.write(((uint8_t)value)); });
@@ -242,17 +331,23 @@ SwiMuxResult_e SwiMuxSerial_t::getUid(uint8_t busIndex, uint64_t& uid, uint32_t 
                     SWI_DBGF("[getUid] payload decoded at %u\r\n", millis());
                     SWI_DBGBUFF("Payload:", payload, pLen);
                     SWI_DBGF("areNegates: %d\r\n", areNegates(payload[0], payload[1]) ? 1 : 0);
-                    if (pLen > 0 && payload != nullptr && payload[0] == SMCMD_HaveUID && areNegates(payload[0], payload[1])) {
-
-                        SWI_DBG("[geUid]\033[93mSUCCESS !!\033[0m\r\n");
-                        uid      = u64fromBytes(payload + 2, sizeof(uid));
-                        _isAwake = true;
-                        return SwiMuxResult_e::SMREZ_OK;
+                    if (pLen > 0 && payload != nullptr && areNegates(payload[0], payload[1])) {
+                        if (payload[0] == SMCMD_HaveUID) {
+                            SWI_DBG("[geUid]\033[93mSUCCESS !!\033[0m\r\n");
+                            uid      = u64fromBytes(payload + 2, sizeof(uid));
+                            _isAwake = true;
+                            return SwiMuxSerialResult_e::SMREZ_OK;
+                        } else if (payload[0] == SMCMD_Nack) {
+                            _lastResult = (SwiMuxSerialResult_e)payload[2];
+                        } else {
+                            _lastResult = SwiMuxSerialResult_e::SMREZ_Framing;
+                        }
                     }
                 } else if (res != SMERR_Ok) {
-                    uid = 0;
+                    _lastResult = (SwiMuxSerialResult_e)res;
+                    uid         = 0;
                     SWI_DBGF("[SwiMuxSerial::getUid] Failed to retreive UID on port %d (err #%d)\r\n", getUidCmd.busIndex, res);
-                    return SwiMuxResult_e::SMREZ_FRAME_ERROR;
+                    return SwiMuxSerialResult_e::SMREZ_Framing;
                 }
             }
         }
@@ -262,10 +357,10 @@ SwiMuxResult_e SwiMuxSerial_t::getUid(uint8_t busIndex, uint64_t& uid, uint32_t 
 }
 
 
-SwiMuxResult_e SwiMuxSerial_t::rollCall(RollCallArray_t& uidsList, uint32_t timeout_ms)
+SwiMuxSerialResult_e SwiMuxSerial_t::rollCall(RollCallArray_t& uidsList, uint32_t timeout_ms)
 {
     if (!assertAwake())
-        return SwiMuxResult_e::SMREZ_SWIMUX_SILENT;
+        return SwiMuxSerialResult_e::SMREZ_SWIMUX_SILENT;
     uint8_t msg[8] = { SMCMD_RollCall, (uint8_t)(0xFF & ~SMCMD_RollCall) };
     _codec.encode(msg, 2, [this](uint8_t val) { this->_sPort.write(val); });
 
@@ -284,15 +379,20 @@ SwiMuxResult_e SwiMuxSerial_t::rollCall(RollCallArray_t& uidsList, uint32_t time
                 SwiMuxError_e res = _codec.decode((uint8_t)charVal, payload, pLen);
                 if (res == SMERR_Done) {
                     SWI_DBGF("[rollCall] payload decoded at %u\r\n", millis());
-                    if (pLen == sizeof(SwiMuxRollCallResult_t) && payload != nullptr && payload[0] == SMCMD_RollCall
-                      && areNegates(payload[0], payload[1])) { // valid payload ?
-                        SWI_DBG("[rollCall] payload validated !\r\n");
-                        SWI_DBGBUFF("uids:", &payload[2], pLen - 2);
-                        for (int busIndex = 0; busIndex < NUMBER_OF_BUSES; busIndex++) {
-                            memcpy((void*)&uidsList.bus[busIndex], (void*)&payload[2 + busIndex * 8], 8);
+                    if (pLen == sizeof(SwiMuxRollCallResult_t) && payload != nullptr && areNegates(payload[0], payload[1])) {
+                        if (payload[0] == SMCMD_RollCall) { // valid payload ?
+                            SWI_DBG("[rollCall] payload validated !\r\n");
+                            SWI_DBGBUFF("uids:", &payload[2], pLen - 2);
+                            for (int busIndex = 0; busIndex < NUMBER_OF_BUSES; busIndex++) {
+                                memcpy((void*)&uidsList.bus[busIndex], (void*)&payload[2 + busIndex * 8], 8);
+                            }
+                            _isAwake = true;
+                            return SMREZ_OK;
+                        } else if (payload[0] == SMCMD_Nack) {
+                            _lastResult = (SwiMuxSerialResult_e)payload[2];
+                        } else {
+                            _lastResult = SMREZ_Framing;
                         }
-                        _isAwake = true;
-                        return SMREZ_OK;
                     } else { // We got a paylod, but not the expected one.
                         SWI_DBGF("[rollCall] payload invalid (payLoad=%p, pLen=%d) !\r\n", payload, pLen);
                         SWI_DBGBUFF("contents:", payload, pLen);
@@ -302,7 +402,7 @@ SwiMuxResult_e SwiMuxSerial_t::rollCall(RollCallArray_t& uidsList, uint32_t time
                 } else if (res != SMERR_Ok) {
                     _isAwake = true;
                     ESP_LOGW(TAG, "Failed to retreive roll call (err #%d)", res);
-                    return SMREZ_FRAME_ERROR;
+                    return SMREZ_Framing;
                 }
             }
         }
@@ -312,12 +412,12 @@ SwiMuxResult_e SwiMuxSerial_t::rollCall(RollCallArray_t& uidsList, uint32_t time
 }
 
 
-SwiMuxResult_e SwiMuxSerial_t::read(uint8_t busIndex, uint8_t* bufferOut, uint8_t offset, uint8_t len, uint32_t timeout_ms)
+SwiMuxSerialResult_e SwiMuxSerial_t::read(uint8_t busIndex, uint8_t* bufferOut, uint8_t offset, uint8_t len, uint32_t timeout_ms)
 {
     if (bufferOut == nullptr)
         return SMREZ_NULL_PARAM;
     if (!assertAwake())
-        return SwiMuxResult_e::SMREZ_SWIMUX_SILENT;
+        return SwiMuxSerialResult_e::SMREZ_SWIMUX_SILENT;
     // Start by sending the read request.
     SwiMuxCmdRead_t cmd = { .Opcode = SMCMD_ReadBytes,
         .NegOpcode                  = (uint8_t)(0xFF & ~SMCMD_ReadBytes),
@@ -338,12 +438,11 @@ SwiMuxResult_e SwiMuxSerial_t::read(uint8_t busIndex, uint8_t* bufferOut, uint8_
             if (res == SMERR_Done) {
                 SWI_DBGF("[read] payload decoded at %u\r\n", millis());
                 if (pLen <= (len + sizeof(SwiMuxCmdRead_t)) && payload != nullptr) {
-                    SWI_DBGF("Reported `SMCMD_ReadBytes` pLen=%d, reportedLen=%d",pLen, payload[4]);
-
                     // Check and copy the payload.0
                     if (payload[0] != (uint8_t)SMCMD_ReadBytes || !areNegates(payload[0], payload[1]) || payload[2] != cmd.busIndex
                       || payload[3] != cmd.offset) {
                         // Payload has some unexpected header.
+
                         ESP_LOGE(TAG, "Unexpected values in read response header.");
                         _isAwake = true;
                         return SMREZ_READ_RESP_ERROR;
@@ -359,7 +458,7 @@ SwiMuxResult_e SwiMuxSerial_t::read(uint8_t busIndex, uint8_t* bufferOut, uint8_
                         if (pLen < (sizeof(SwiMuxCmdRead_t) + reportedLen)) {
                             ESP_LOGE(
                               TAG, "Read failed: packet truncated. pLen=%d, expected at least %d", pLen, sizeof(SwiMuxCmdRead_t) + reportedLen);
-                            return SMREZ_FRAME_ERROR;
+                            return SMREZ_Framing;
                         }
 
                         memcpy(bufferOut, &payload[sizeof(SwiMuxCmdRead_t)], reportedLen);
@@ -370,7 +469,7 @@ SwiMuxResult_e SwiMuxSerial_t::read(uint8_t busIndex, uint8_t* bufferOut, uint8_
                 }
             } else if (res != SMERR_Ok) {
                 ESP_LOGW(TAG, "Failed to read device on bus %d (err #%d)", cmd.busIndex, res);
-                return SMREZ_FRAME_ERROR;
+                return SMREZ_Framing;
             }
         }
         vTaskDelay(1); // with a tick of 1ms (as default on ESP32), we should get 5.76 characters per wait cycle @ 57600bds.
@@ -379,12 +478,12 @@ SwiMuxResult_e SwiMuxSerial_t::read(uint8_t busIndex, uint8_t* bufferOut, uint8_
 }
 
 
-SwiMuxResult_e SwiMuxSerial_t::write(uint8_t busIndex, const uint8_t* bufferIn, uint8_t offset, uint8_t len, uint32_t timeout_ms)
+SwiMuxSerialResult_e SwiMuxSerial_t::write(uint8_t busIndex, const uint8_t* bufferIn, uint8_t offset, uint8_t len, uint32_t timeout_ms)
 {
     if (bufferIn == nullptr)
         return SMREZ_NULL_PARAM;
     if (!assertAwake())
-        return SwiMuxResult_e::SMREZ_SWIMUX_SILENT;
+        return SwiMuxSerialResult_e::SMREZ_SWIMUX_SILENT;
     // Create a write command.
     SwiMuxCmdWrite_t* pCmd = (SwiMuxCmdWrite_t*)malloc(sizeof(SwiMuxCmdWrite_t) + (size_t)len);
 
@@ -394,10 +493,10 @@ SwiMuxResult_e SwiMuxSerial_t::write(uint8_t busIndex, const uint8_t* bufferIn, 
         return SMREZ_WRITE_OUTOFMEM;
     }
 
-    // --- START DEBUG ADDITIONS ---
-    Serial.printf("[DEBUG] pCmd after malloc: %p\n", pCmd);
-    Serial.flush();
-    // --- END DEBUG ADDITIONS ---
+    //// --- START DEBUG ADDITIONS ---
+    //Serial.printf("[DEBUG] pCmd after malloc: %p\n", pCmd);
+    //Serial.flush();
+    //// --- END DEBUG ADDITIONS ---
 
     pCmd->Opcode    = SMCMD_WriteBytes;
     pCmd->NegOpcode = (uint8_t)(0xFF & ~SMCMD_WriteBytes);
@@ -405,26 +504,27 @@ SwiMuxResult_e SwiMuxSerial_t::write(uint8_t busIndex, const uint8_t* bufferIn, 
     pCmd->offset    = offset;
     pCmd->length    = len;
 
-    // --- START DEBUG ADDITIONS ---
-    Serial.printf("[DEBUG] pCmd before memcpy: %p\n", pCmd);
-    Serial.printf("[DEBUG] Dest address: %p\n", &pCmd->length + 1);
-    Serial.printf("[DEBUG] Src address: %p\n", bufferIn);
-    Serial.printf("[DEBUG] Src length: %u\n", len);
-    Serial.flush();
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    // --- END DEBUG ADDITIONS ---
+    //// --- START DEBUG ADDITIONS ---
+    //Serial.printf("[DEBUG] pCmd before memcpy: %p\r\n", pCmd);
+    //Serial.printf("[DEBUG] Dest address: %p\r\n", &pCmd->length + 1);
+    //Serial.printf("[DEBUG] Src address: %p\r\n", bufferIn);
+    //Serial.printf("[DEBUG] Src length: %u\r\n", len);
+    //Serial.flush();
+    //vTaskDelay(pdMS_TO_TICKS(1000));
+    //// --- END DEBUG ADDITIONS ---
 
     // Copy into pCmd just after the SwiMuxCmdWrite_t header last byte
     memcpy(&pCmd->length + 1, bufferIn, len);
 
-    SwiMuxResult_e result = SMREZ_WRITE_ENCODE_FAILED;
+    SwiMuxSerialResult_e result = SMREZ_WRITE_ENCODE_FAILED;
     if (_codec.encode((const uint8_t*)(void*)pCmd, sizeof(SwiMuxCmdWrite_t) + (size_t)len, [this](uint8_t wrtVal) { this->_sPort.write(wrtVal); })) {
         if (_codec.waitForAckTo(
-              SMCMD_WriteBytes, millis, [this]() -> int { return this->_sPort.read(); }, [](unsigned long wms) { vTaskDelay(pdMS_TO_TICKS(wms)); })) {
+              SMCMD_WriteBytes, millis, [this]() -> int { return this->_sPort.read(); }, [](unsigned long wms) { vTaskDelay(pdMS_TO_TICKS(wms)); },
+              3000)) /* <-- timeout_ms = 13ms per character + 70ms per block of 8 bytes + 70ms for a single write */ {
             _isAwake = true;
             result   = SMREZ_OK;
         } else {
-            result = SMREZ_TIMED_OUT;
+            result = (SwiMuxSerialResult_e)_codec.getLastAckError();
         }
     }
     free(pCmd);

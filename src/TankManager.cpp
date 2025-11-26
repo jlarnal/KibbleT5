@@ -809,12 +809,12 @@ bool TankManager::testSwiBusUID(uint8_t index, uint64_t& result)
 
     if (xSemaphoreTakeRecursive(_swimuxMutex, MUTEX_ACQUISITION_TIMEOUT) == pdTRUE) {
 
-        SwiMuxResult_e res = _swiMux.getUid(index % 6, result);
+        SwiMuxSerialResult_e res = _swiMux.getUid(index % 6, result);
 
         xSemaphoreGiveRecursive(_swimuxMutex);
         if (res == SMREZ_OK)
             return true;
-        ESP_LOGD(TAG, "UID acquisition failed (%s)", SwiMuxResultString(res));
+        ESP_LOGD(TAG, "UID acquisition failed (%s)", SwiMuxSerial_t::getResultValueName(res));
     } else {
         ESP_LOGE(TAG, "Error: Could not acquire SwiMux mutex for test.");
     }
@@ -825,8 +825,8 @@ bool TankManager::testSwiBusUID(uint8_t index, uint64_t& result)
 bool TankManager::testRollCall(RollCallArray_t& results)
 {
 
-    SwiMuxResult_e res = _swiMux.rollCall(results);
-    if (res != SwiMuxResult_e::SMREZ_OK) {
+    SwiMuxSerialResult_e res = _swiMux.rollCall(results);
+    if (res != SwiMuxSerialResult_e::SMREZ_OK) {
         ESP_LOGD(TAG, "rollCall failed with error %d", res);
         return false;
     } else {
@@ -835,12 +835,12 @@ bool TankManager::testRollCall(RollCallArray_t& results)
     return true;
 }
 
-SwiMuxResult_e TankManager::testSwiRead(uint8_t busIndex, uint16_t address, uint8_t* dataOut, uint16_t length)
+SwiMuxSerialResult_e TankManager::testSwiRead(uint8_t busIndex, uint16_t address, uint8_t* dataOut, uint16_t length)
 {
     return _swiMux.read(busIndex, dataOut, address & 0xFF, length);
 }
 
-SwiMuxResult_e TankManager::testSwiWrite(uint8_t busIndex, uint16_t address, const uint8_t* dataIn, uint16_t length)
+SwiMuxSerialResult_e TankManager::testSwiWrite(uint8_t busIndex, uint16_t address, const uint8_t* dataIn, uint16_t length)
 {
     return _swiMux.write(busIndex, dataIn, address & 0xFF, length);
 }

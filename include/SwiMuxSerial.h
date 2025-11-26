@@ -4,10 +4,9 @@
 #include <HardwareSerial.h>
 #include "SwiMuxComms.hpp"
 
-enum SwiMuxResult_e
+enum SwiMuxSerialResult_e : uint8_t /* Includes proprietary values as well as values from SwiMuxError_e and OneWireError_e */
 {
     SMREZ_OK = 0,
-    SMREZ_FRAME_ERROR,
     SMREZ_INVALID_PAYLOAD,
     SMREZ_BUS_INDEX_OUT_OF_RANGE,
     SMREZ_NO_DEVICE,
@@ -18,9 +17,49 @@ enum SwiMuxResult_e
     SMREZ_WRITE_ACK_MISSING,
     SMREZ_SWIMUX_SILENT,
     SMREZ_NULL_PARAM,
+    SMREZ_OW_DIO_PORT_NULL = SwiMuxError_e::SMERR_OW_DIO_PORT_NULL,
+    SMREZ_OW_DIO_PORT_INVALID,
+    SMREZ_OW_DIO_PIN_INVALID,
+    SMREZ_OW_PULLUP_PORT_INVALID,
+    SMREZ_OW_PULLUP_PIN_INVALID,
+    SMREZ_OW_NULL_INPUT_BUFFER,
+    SMREZ_OW_NULL_OUTPUT_BUFFER,
+    SMREZ_OW_NO_BUS_POWER,
+    SMREZ_OW_BUS_HELD_LOW,
+    SMREZ_OW_NO_DEVICE_PRESENT,
+    SMREZ_OW_READ_ROM_FAILED,
+    SMREZ_OW_ALIGNED_WRITE_HEAD_PREREAD,
+    SMREZ_OW_ALIGNED_WRITE_TAIL_PREREAD,
+    SMREZ_OW_MEMADDRESS_OUT_OF_BOUNDS, // Specified address is out of memory bounds.
+    SMREZ_OW_OUT_OF_BOUNDS, // Specified length exceeds out of memory bounds.
+    SMREZ_OW_WRITE_MEM_FAILED,
+    SMREZ_OW_MULTIDROP_ID_UNREADABLE,
+    SMREZ_OW_WRITE_SCRATCHPAD_PRESELECT,
+    SMREZ_OW_WRITE_SCRATCHPAD_CRC16,
+    SMREZ_OW_READ_SCRATCHPAD_PRESELECT,
+    SMREZ_OW_READ_SCRATCHPAD_CRC16,
+    SMREZ_OW_SCRATCHPAD_PF, // Power loss or scratchpad not full
+    SMREZ_OW_WRITTEN_SCRATCHPAD_MISMATCH,
+    SMREZ_OW_COPY_SCRATCHPAD_PRESELECT,
+    SMREZ_OW_COPY_SCRATCHPAD,
+    SMREZ_UnkownCommand = SwiMuxError_e::SMERR_UnkownCommand,
+    SMREZ_Framing,
+    SMREZ_WrongEscape,
+    SMREZ_ReadBytesParams,
+    SMREZ_BusIndexOutOfRange,
+    SMREZ_MemOffsetOutOfRange,
+    SMREZ_ReadLengthOutOfRange,
+    SMREZ_ReadMemoryFailed,
+    SMREZ_ResponseEncodingFailed,
+    SMREZ_WriteLengthOutOfRange,
+    SMREZ_WriteFailed,
+    SMREZ_GuidUnreadable,
+    SMREZ_BadCrc,
+    SMREZ_BADFUNCALL, // critial software error
+    SMREZ_CommandDisabled,
 };
 
-const char* SwiMuxResultString(SwiMuxResult_e value);
+
 
 struct SwiMuxPresenceReport_t {
     uint16_t presences;
@@ -48,7 +87,7 @@ struct SwiMuxPresenceReport_t {
 class SwiMuxSerial_t {
   public:
     SwiMuxSerial_t(HardwareSerial& serial, uint8_t txPin, uint8_t rxPin)
-        : _codec(), _sPort(serial), _isAwake(false), _beginCalled(false), _txPin(txPin), _rxPin(rxPin)
+        : _lastResult(SwiMuxSerialResult_e::SMREZ_OK), _codec(), _sPort(serial), _isAwake(false), _beginCalled(false), _txPin(txPin), _rxPin(rxPin)
     {}
 
     void begin();
@@ -62,10 +101,10 @@ class SwiMuxSerial_t {
      */
     bool hasEvents(SwiMuxPresenceReport_t* reportOut = NULL);
     SwiMuxPresenceReport_t getPresence(uint32_t timeout_ms = PRESENCE_TIMEOUT_MS);
-    SwiMuxResult_e rollCall(RollCallArray_t& uids, uint32_t timeout_ms = ROLLCALL_TIMEOUT_MS);
-    SwiMuxResult_e read(uint8_t busIndex, uint8_t* bufferOut, uint8_t offset, uint8_t len, uint32_t timeout_ms = READ_TIMEOUT_MS);
-    SwiMuxResult_e write(uint8_t busIndex, const uint8_t* bufferIn, uint8_t offset, uint8_t len, uint32_t timeout_ms = WRITE_TIMEOUT_MS);
-    SwiMuxResult_e getUid(uint8_t busIndex, uint64_t& result, uint32_t timeout_ms = GETUID_TIMEOUT_MS);
+    SwiMuxSerialResult_e rollCall(RollCallArray_t& uids, uint32_t timeout_ms = ROLLCALL_TIMEOUT_MS);
+    SwiMuxSerialResult_e read(uint8_t busIndex, uint8_t* bufferOut, uint8_t offset, uint8_t len, uint32_t timeout_ms = READ_TIMEOUT_MS);
+    SwiMuxSerialResult_e write(uint8_t busIndex, const uint8_t* bufferIn, uint8_t offset, uint8_t len, uint32_t timeout_ms = WRITE_TIMEOUT_MS);
+    SwiMuxSerialResult_e getUid(uint8_t busIndex, uint64_t& result, uint32_t timeout_ms = GETUID_TIMEOUT_MS);
 
 
 #ifdef KIBBLET5_DEBUG_ENABLED
@@ -74,6 +113,7 @@ class SwiMuxSerial_t {
 
 #endif
 
+    static const char* getResultValueName(const SwiMuxSerialResult_e value);
     static constexpr uint32_t DEFAULT_SERIAL_CONFIG = SERIAL_8N1;
     static constexpr uint32_t DEFAULT_SERIAL_BAUDS  = 57600;
 
@@ -95,6 +135,7 @@ class SwiMuxSerial_t {
     bool assertAwake(size_t retries = AWAKE_RETRIES_DEFAULT);
     SwiMuxPresenceReport_t _pollPresencePacket(uint32_t timeout_ms = PRESENCE_TIMEOUT_MS);
     bool pollAck(SwiMuxOpcodes_e opcode, uint32_t timeout_ms = 15);
+    SwiMuxSerialResult_e _lastResult;
     SwiMuxComms_t _codec;
     HardwareSerial _sPort;
     volatile bool _isAwake, _beginCalled;
